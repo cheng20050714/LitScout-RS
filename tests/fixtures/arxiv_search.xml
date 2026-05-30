@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <title>arXiv Query: search_query=all:rust agent framework</title>
+  <id>https://arxiv.org/api/query</id>
+  <updated>2026-05-30T00:00:00Z</updated>
+  <entry>
+    <id>https://arxiv.org/abs/2401.12345v2</id>
+    <updated>2026-01-03T00:00:00Z</updated>
+    <published>2026-01-01T00:00:00Z</published>
+    <title>
+      Rust Agents &amp; Tool Calling
+    </title>
+    <summary>
+      This paper studies
+      Rust-based agents with tool calling.
+    </summary>
+    <author>
+      <name>Ada Lovelace</name>
+    </author>
+    <author>
+      <name>Alan Turing</name>
+    </author>
+    <link href="https://arxiv.org/abs/2401.12345v2" rel="alternate" type="text/html"/>
+    <link title="pdf" href="https://arxiv.org/pdf/2401.12345v2" rel="related" type="application/pdf"/>
+    <arxiv:primary_category term="cs.AI"/>
+    <category term="cs.AI"/>
+    <category term="cs.SE"/>
+  </entry>
+  <entry>
+    <id>https://arxiv.org/abs/2501.00001</id>
+    <updated>2026-02-01T00:00:00Z</updated>
+    <published>2026-01-20T00:00:00Z</published>
+    <title>Agent Benchmarking in Rust</title>
+    <summary>Benchmark design for code agents.</summary>
+    <author>
+      <name>Grace Hopper</name>
+    </author>
+    <link href="https://arxiv.org/abs/2501.00001" rel="alternate" type="text/html"/>
+    <category term="cs.LG"/>
+  </entry>
+</feed>

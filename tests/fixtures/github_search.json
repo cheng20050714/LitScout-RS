@@ -1,0 +1,33 @@
+{
+  "total_count": 2,
+  "incomplete_results": false,
+  "items": [
+    {
+      "name": "rust",
+      "full_name": "rust-lang/rust",
+      "html_url": "https://github.com/rust-lang/rust",
+      "description": "Empowering everyone to build reliable and efficient software.",
+      "stargazers_count": 100000,
+      "forks_count": 12000,
+      "language": "Rust",
+      "updated_at": "2026-05-29T12:00:00Z",
+      "topics": ["compiler", "rust"],
+      "owner": {
+        "login": "rust-lang"
+      }
+    },
+    {
+      "name": "rig",
+      "full_name": "0xPlaygrounds/rig",
+      "html_url": "https://github.com/0xPlaygrounds/rig",
+      "description": "Build portable, modular AI agents in Rust.",
+      "stargazers_count": 5200,
+      "forks_count": 340,
+      "language": "Rust",
+      "updated_at": "2026-05-28T08:30:00Z",
+      "owner": {
+        "login": "0xPlaygrounds"
+      }
+    }
+  ]
+}
