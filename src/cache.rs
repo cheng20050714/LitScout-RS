@@ -266,6 +266,7 @@ mod tests {
             output: cache_dir.join("report.md"),
             cache_dir,
             session_dir: PathBuf::from("sessions"),
+            tags_file: None,
             use_cache: true,
             cache_ttl_hours: ttl_hours,
             timeout_secs: 30,

@@ -29,13 +29,13 @@
 - [x] **M2**: Raw topic may be misinterpreted as GitHub search qualifier (add comment or fix)
 - [x] **L1**: Add `&#xA0;` (non-breaking space) decoding in arXiv `decode_common_entities`
 - [x] **L2**: Remove dead code `_required_headers()` function in `github.rs`
-- [ ] **L3**: Extract shared `/abs/` URL stripping utility (refactoring, non-urgent)
+- [x] **L3**: Extract shared `/abs/` URL stripping utility (refactoring, non-urgent)
 
 ## Optional Enhancements
 
-- [ ] `--llm` SearchPlan generation.
+- [x] `--llm` SearchPlan generation.
 - [x] `--llm` report synthesis.
-- [ ] LLM citation quality repair, max one retry.
+- [x] LLM citation quality repair, max one retry.
 - [x] DeepSeek OpenAI-compatible chat completion call.
 - [ ] `--enrich` GitHub README/topics fetch with bounded concurrency.
 - [ ] JSON export.
@@ -46,5 +46,4 @@
 - GitHub rate limits may require a token and cache.
 - arXiv XML namespaces need careful parser tests.
 - LLM output must never replace source-grounded report data.
-- `--llm` currently synthesizes after deterministic retrieval; it does not yet generate SearchPlan query variants.
 - Future enrich mode must either bypass cache or extend cache keys to include enrichment settings.

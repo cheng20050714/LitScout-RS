@@ -7,7 +7,7 @@ use roxmltree::{Document, Node};
 
 use crate::config::AppConfig;
 use crate::error::{AppError, Result};
-use crate::model::{ArxivPaper, SearchQuery};
+use crate::model::{arxiv_id_from_abs_url, ArxivPaper, SearchQuery};
 
 const ARXIV_API_URL: &str = "https://export.arxiv.org/api/query";
 const ATOM_NS: &str = "http://www.w3.org/2005/Atom";
@@ -60,7 +60,7 @@ pub fn parse_arxiv_atom(xml: &str) -> Result<Vec<ArxivPaper>> {
 
 fn parse_entry(entry: Node<'_, '_>) -> Result<ArxivPaper> {
     let id_url = child_text(entry, ATOM_NS, "id").ok_or_else(|| missing_field("id"))?;
-    let arxiv_id = extract_arxiv_id(&id_url);
+    let arxiv_id = arxiv_id_from_abs_url(&id_url);
     let title = child_text(entry, ATOM_NS, "title").ok_or_else(|| missing_field("title"))?;
     let summary = child_text(entry, ATOM_NS, "summary").ok_or_else(|| missing_field("summary"))?;
     let published_raw =
@@ -145,15 +145,6 @@ fn parse_datetime(value: &str, field: &'static str) -> Result<DateTime<Utc>> {
 
 fn missing_field(field: &'static str) -> AppError {
     AppError::Xml(format!("missing required arXiv field `{field}`"))
-}
-
-fn extract_arxiv_id(id_url: &str) -> String {
-    id_url
-        .rsplit_once("/abs/")
-        .map(|(_, id)| id)
-        .unwrap_or(id_url)
-        .trim()
-        .to_string()
 }
 
 fn clean_text(text: &str) -> String {

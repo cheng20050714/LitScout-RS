@@ -10,6 +10,7 @@ cargo run -- "retrieval augmented generation" --github-limit 10 --arxiv-limit 10
 cargo run -- "code agent benchmark" --output reports/agent.md
 cargo run -- "rag" --no-cache
 cargo run -- "llm tool calling" --llm
+cargo run -- "rust agent framework" --tags-file tags.example.toml
 cargo run -- "rust agent framework" --enrich
 ```
 
@@ -22,9 +23,23 @@ export DEEPSEEK_API_KEY=...
 
 `GITHUB_TOKEN` is optional but recommended to reduce GitHub API rate-limit issues.
 
+Reports are written to `reports/<topic>-<timestamp>.md` by default. Each run also writes a session JSON record under `sessions/` unless the session directory is changed with `--session-dir`.
+
+## Configuration Files
+
+- `.env.example` lists supported environment variables.
+- `config.example.toml` documents a stable project profile for demos and reports.
+- `tags.example.toml` defines the external classification dictionary format.
+
+Custom tags:
+
+```bash
+cargo run -- "code agent benchmark" --tags-file tags.example.toml
+```
+
 ## DeepSeek LLM Agent Mode
 
-`--llm` enables the DeepSeek-backed analysis layer after GitHub and arXiv data have already been collected, deduplicated, ranked, classified, and converted into the local `CitationLedger`.
+`--llm` enables the DeepSeek-backed analysis layer. DeepSeek first creates a bounded SearchPlan with at most three GitHub/arXiv query aspects. After deterministic retrieval, ranking, classification, and citation construction, DeepSeek generates the analysis section.
 
 DeepSeek only receives the structured GitHub/arXiv context produced by LitScout-RS. It is instructed not to browse, invent sources, or add URLs outside the citation ledger. If its output drops source URLs or references unknown citations, the quality gate records a warning or the synthesis is rejected.
 
@@ -59,7 +74,24 @@ DEEPSEEK_API_KEY=... cargo run -- "llm tool calling" --llm
 
 If `--llm` is enabled without an API key, the program returns a clear configuration error instead of pretending that LLM synthesis succeeded.
 
-Reports are written to `reports/<topic>-<timestamp>.md` by default. Use `--output reports/agent.md` to write a fixed file path.
+If DeepSeek synthesis fails citation validation, LitScout-RS sends one repair prompt. If repair still fails, the deterministic report is kept and the warning is recorded.
+
+## Examples And Demo
+
+- Rule-based sample: `examples/sample_report.md`
+- LLM-assisted sample: `examples/sample_llm_report.md`
+- Demo script: `scripts/demo.sh`
+- Demo slide outline: `docs/demo_slides.md`
+
+## Rust Features Demonstrated
+
+- `tokio::join!` for concurrent GitHub/arXiv requests.
+- `reqwest` for GitHub, arXiv, and DeepSeek HTTP calls.
+- `serde` for API responses, cache, session JSON, and LLM JSON output.
+- `roxmltree` for arXiv Atom XML parsing.
+- `clap` for CLI parsing.
+- `thiserror` for typed errors.
+- Modular source, ranking, classification, report, quality, session, and LLM modules.
 
 ## Development Checks
 

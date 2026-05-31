@@ -41,6 +41,21 @@ pub struct Cli {
 
     #[arg(
         long,
+        value_name = "DIR",
+        default_value = "sessions",
+        help = "Session JSON directory"
+    )]
+    pub session_dir: PathBuf,
+
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Optional TOML classification tag dictionary"
+    )]
+    pub tags_file: Option<PathBuf>,
+
+    #[arg(
+        long,
         default_value_t = 24,
         value_name = "HOURS",
         help = "Cache TTL in hours"

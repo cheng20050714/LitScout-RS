@@ -3,3 +3,5 @@
 cache/
 .litscout-cache/
 reports/
+sessions/
+.env

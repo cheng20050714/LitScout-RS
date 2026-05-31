@@ -6,12 +6,13 @@ use tracing::warn;
 use crate::config::{AppConfig, LlmConfig};
 use crate::dedup;
 use crate::error::{AppError, Result};
-use crate::llm::deepseek::{DeepSeekClient, DeepSeekConfig};
+use crate::llm::deepseek::{DeepSeekClient, DeepSeekConfig, LlmSynthesisResult};
 use crate::model::{
-    ArxivPaper, CitationLedger, GitHubRepo, LlmSynthesis, QualityReport, ScoutReport, SearchPlan,
-    SearchQuery, SourceItem,
+    ArxivPaper, CitationLedger, GitHubRepo, QualityReport, ScoutReport, SearchPlan, SearchQuery,
+    SourceItem,
 };
 use crate::report;
+use crate::session;
 use crate::sources::{arxiv, github};
 use crate::{cache, classify, quality, ranking};
 
@@ -29,12 +30,22 @@ pub async fn run(
         tokio::fs::create_dir_all(&app_config.cache_dir).await?;
     }
 
+    let mut warnings = Vec::new();
+    let plan = match generate_search_plan(&query, &llm_config).await {
+        Ok(plan) => plan,
+        Err(err) => {
+            let message = format!("DeepSeek SearchPlan failed: {err}; using original topic.");
+            warn!("{message}");
+            warnings.push(message);
+            SearchPlan::from_query(&query)
+        }
+    };
+
     let (github_result, arxiv_result) = tokio::join!(
-        fetch_github_with_cache(&query, &app_config),
-        fetch_arxiv_with_cache(&query, &app_config)
+        fetch_github_with_cache_for_plan(&plan, &query, &app_config),
+        fetch_arxiv_with_cache_for_plan(&plan, &query, &app_config)
     );
 
-    let mut warnings = Vec::new();
     let (github_repos, github_ok) = match github_result {
         Ok(repos) => (repos, true),
         Err(err) => {
@@ -62,6 +73,7 @@ pub async fn run(
 
     build_and_write_report(
         query,
+        plan,
         app_config,
         llm_config,
         github_repos,
@@ -69,6 +81,83 @@ pub async fn run(
         warnings,
     )
     .await
+}
+
+async fn fetch_github_with_cache_for_plan(
+    plan: &SearchPlan,
+    query: &SearchQuery,
+    config: &AppConfig,
+) -> Result<Vec<GitHubRepo>> {
+    let aspects = bounded_aspects(plan);
+    let per_aspect_limit = split_limit(query.github_limit, aspects.len());
+    let mut repos = Vec::new();
+    let mut failures = Vec::new();
+
+    for aspect in aspects {
+        let aspect_query = SearchQuery {
+            topic: aspect.github_query.clone(),
+            github_limit: per_aspect_limit,
+            arxiv_limit: query.arxiv_limit,
+        };
+        match fetch_github_with_cache(&aspect_query, config).await {
+            Ok(mut items) => repos.append(&mut items),
+            Err(err) => {
+                let message = format!("GitHub aspect `{}` failed: {err}", aspect.name);
+                warn!("{message}");
+                failures.push(message);
+            }
+        }
+    }
+
+    repos.truncate(query.github_limit);
+    if repos.is_empty() && !failures.is_empty() {
+        return Err(AppError::Workflow(failures.join("; ")));
+    }
+    Ok(repos)
+}
+
+async fn fetch_arxiv_with_cache_for_plan(
+    plan: &SearchPlan,
+    query: &SearchQuery,
+    config: &AppConfig,
+) -> Result<Vec<ArxivPaper>> {
+    let aspects = bounded_aspects(plan);
+    let per_aspect_limit = split_limit(query.arxiv_limit, aspects.len());
+    let mut papers = Vec::new();
+    let mut failures = Vec::new();
+
+    for aspect in aspects {
+        let aspect_query = SearchQuery {
+            topic: aspect.arxiv_query.clone(),
+            github_limit: query.github_limit,
+            arxiv_limit: per_aspect_limit,
+        };
+        match fetch_arxiv_with_cache(&aspect_query, config).await {
+            Ok(mut items) => papers.append(&mut items),
+            Err(err) => {
+                let message = format!("arXiv aspect `{}` failed: {err}", aspect.name);
+                warn!("{message}");
+                failures.push(message);
+            }
+        }
+    }
+
+    papers.truncate(query.arxiv_limit);
+    if papers.is_empty() && !failures.is_empty() {
+        return Err(AppError::Workflow(failures.join("; ")));
+    }
+    Ok(papers)
+}
+
+fn bounded_aspects(plan: &SearchPlan) -> Vec<&crate::model::SearchAspect> {
+    plan.aspects.iter().take(3).collect()
+}
+
+fn split_limit(limit: usize, parts: usize) -> usize {
+    if parts == 0 {
+        return limit.max(1);
+    }
+    limit.div_ceil(parts).max(1)
 }
 
 async fn fetch_github_with_cache(
@@ -111,6 +200,7 @@ async fn fetch_arxiv_with_cache(
 
 async fn build_and_write_report(
     query: SearchQuery,
+    plan: SearchPlan,
     app_config: AppConfig,
     llm_config: LlmConfig,
     github_repos: Vec<GitHubRepo>,
@@ -119,16 +209,17 @@ async fn build_and_write_report(
 ) -> Result<PathBuf> {
     ensure_llm_ready(&llm_config)?;
 
-    let plan = SearchPlan::from_query(&query);
     let mut source_items = github_repos
         .iter()
         .map(SourceItem::from)
         .collect::<Vec<SourceItem>>();
     source_items.extend(arxiv_papers.iter().map(SourceItem::from));
 
+    let rules = classify::load_rules(app_config.tags_file.as_deref())?;
     let deduped_items = dedup::dedup_by_id(source_items);
-    let ranked_items = classify::classify_items(ranking::rank_items(&query, deduped_items));
-    let groups = classify::group_by_tags(&ranked_items);
+    let mut ranked_items = ranking::rank_items(&query, deduped_items);
+    classify::classify_items_with_rules(&mut ranked_items, &rules);
+    let groups = classify::group_by_tags(&ranked_items, &rules);
     let citations = CitationLedger::from_items(&ranked_items);
 
     let mut report = ScoutReport {
@@ -144,10 +235,12 @@ async fn build_and_write_report(
         quality: QualityReport::pass(),
     };
 
+    let mut llm_repaired = false;
     if llm_config.enabled {
         match synthesize_with_deepseek(&llm_config, &report).await {
-            Ok(synthesis) => {
-                report.llm_synthesis = Some(synthesis);
+            Ok(result) => {
+                llm_repaired = result.repaired;
+                report.llm_synthesis = Some(result.synthesis);
             }
             Err(err) => {
                 let message = format!("DeepSeek synthesis failed: {err}; using rule-based report.");
@@ -158,6 +251,7 @@ async fn build_and_write_report(
     }
 
     report.quality = quality::evaluate(&report, llm_config.enabled);
+    report.quality.llm_repaired = llm_repaired;
     if app_config.github_token.is_none() {
         warnings.push(
             "No GitHub token provided; unauthenticated GitHub API mode was used.".to_string(),
@@ -169,7 +263,15 @@ async fn build_and_write_report(
     }
 
     let output_path = report::write_markdown(&report, &app_config.output).await?;
-    print_run_summary(&report, &output_path);
+    let session_path =
+        match session::write_session(&report, &app_config, &llm_config, &output_path).await {
+            Ok(path) => Some(path),
+            Err(err) => {
+                warn!("Failed to write session JSON: {err}");
+                None
+            }
+        };
+    print_run_summary(&report, &output_path, session_path.as_ref());
     Ok(output_path)
 }
 
@@ -186,7 +288,7 @@ fn ensure_llm_ready(llm_config: &LlmConfig) -> Result<()> {
 async fn synthesize_with_deepseek(
     llm_config: &LlmConfig,
     report: &ScoutReport,
-) -> Result<LlmSynthesis> {
+) -> Result<LlmSynthesisResult> {
     let config = DeepSeekConfig::from_llm_config(llm_config).ok_or_else(|| {
         AppError::InvalidConfig(
             "`--llm` requires a DeepSeek API key. Set DEEPSEEK_API_KEY or pass --deepseek-api-key."
@@ -197,12 +299,29 @@ async fn synthesize_with_deepseek(
     client.synthesize_report(report).await
 }
 
-fn print_run_summary(report: &ScoutReport, output_path: &PathBuf) {
+async fn generate_search_plan(query: &SearchQuery, llm_config: &LlmConfig) -> Result<SearchPlan> {
+    if !llm_config.enabled {
+        return Ok(SearchPlan::from_query(query));
+    }
+    let config = DeepSeekConfig::from_llm_config(llm_config).ok_or_else(|| {
+        AppError::InvalidConfig(
+            "`--llm` requires a DeepSeek API key. Set DEEPSEEK_API_KEY or pass --deepseek-api-key."
+                .to_string(),
+        )
+    })?;
+    let client = DeepSeekClient::new(config)?;
+    client.generate_search_plan(query).await
+}
+
+fn print_run_summary(report: &ScoutReport, output_path: &PathBuf, session_path: Option<&PathBuf>) {
     println!("Query: {}", report.query.topic);
     println!("GitHub repositories: {}", report.github_repos.len());
     println!("arXiv papers: {}", report.arxiv_papers.len());
     println!("Deduplicated items: {}", report.ranked_items.len());
     println!("Output report: {}", output_path.display());
+    if let Some(path) = session_path {
+        println!("Session JSON: {}", path.display());
+    }
     for warning in &report.quality.warnings {
         eprintln!("Warning: {warning}");
     }
@@ -233,11 +352,13 @@ mod tests {
             github_limit: 10,
             arxiv_limit: 10,
         };
+        let plan = crate::model::SearchPlan::from_query(&query);
         let config = AppConfig {
             github_token: Some("token".to_string()),
             output: output.clone(),
             cache_dir: output.with_extension("cache"),
-            session_dir: PathBuf::from("sessions"),
+            session_dir: output.with_extension("sessions"),
+            tags_file: None,
             use_cache: false,
             cache_ttl_hours: 24,
             timeout_secs: 30,
@@ -247,6 +368,7 @@ mod tests {
 
         let path = build_and_write_report(
             query,
+            plan,
             config,
             llm_config,
             vec![sample_repo()],
@@ -271,11 +393,13 @@ mod tests {
             github_limit: 10,
             arxiv_limit: 10,
         };
+        let plan = crate::model::SearchPlan::from_query(&query);
         let config = AppConfig {
             github_token: Some("token".to_string()),
             output: output.clone(),
             cache_dir: output.with_extension("cache"),
-            session_dir: PathBuf::from("sessions"),
+            session_dir: output.with_extension("sessions"),
+            tags_file: None,
             use_cache: false,
             cache_ttl_hours: 24,
             timeout_secs: 30,
@@ -293,6 +417,7 @@ mod tests {
 
         let err = build_and_write_report(
             query,
+            plan,
             config,
             llm_config,
             vec![sample_repo()],

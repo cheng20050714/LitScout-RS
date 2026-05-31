@@ -6,7 +6,10 @@ use tracing::warn;
 
 use crate::config::LlmConfig;
 use crate::error::{AppError, Result};
-use crate::model::{Citation, LlmSynthesis, ScoutReport, SourceItem, SourceKind};
+use crate::model::{
+    Citation, LlmSynthesis, ScoutReport, SearchAspect, SearchPlan, SearchQuery, SourceItem,
+    SourceKind,
+};
 
 const DEFAULT_BASE_URL: &str = "https://api.deepseek.com";
 const CHAT_COMPLETIONS_PATH: &str = "chat/completions";
@@ -67,13 +70,36 @@ impl DeepSeekClient {
         Ok(Self { config, http })
     }
 
-    pub async fn synthesize_report(&self, report: &ScoutReport) -> Result<LlmSynthesis> {
+    pub async fn generate_search_plan(&self, query: &SearchQuery) -> Result<SearchPlan> {
+        let request = self.build_search_plan_request(query)?;
+        let response = self.chat_completions_with_retry(request).await?;
+        let content = response.first_content()?;
+        parse_search_plan_content(content, query)
+    }
+
+    pub async fn synthesize_report(&self, report: &ScoutReport) -> Result<LlmSynthesisResult> {
         let request = self.build_synthesis_request(report)?;
         let response = self.chat_completions_with_retry(request).await?;
         let content = response.first_content()?;
-        let synthesis = parse_synthesis_content(content)?;
-        validate_synthesis(&synthesis, report)?;
-        Ok(synthesis)
+
+        match parse_and_validate_synthesis(content, report) {
+            Ok(synthesis) => Ok(LlmSynthesisResult {
+                synthesis,
+                repaired: false,
+            }),
+            Err(first_err) => {
+                warn!("DeepSeek synthesis validation failed, requesting one repair: {first_err}");
+                let repair_request =
+                    self.build_synthesis_repair_request(report, content, &first_err.to_string())?;
+                let repaired_response = self.chat_completions_with_retry(repair_request).await?;
+                let repaired_content = repaired_response.first_content()?;
+                let synthesis = parse_and_validate_synthesis(repaired_content, report)?;
+                Ok(LlmSynthesisResult {
+                    synthesis,
+                    repaired: true,
+                })
+            }
+        }
     }
 
     async fn chat_completions_with_retry(
@@ -132,6 +158,68 @@ impl DeepSeekClient {
                     content: format!(
                         "Analyze this LitScout-RS context and return only the requested JSON object.\n\n{context_json}"
                     ),
+                },
+            ],
+            temperature: Some(0.2),
+            max_tokens: Some(max_tokens),
+            stream: Some(false),
+            response_format: Some(ResponseFormat {
+                r#type: "json_object".to_string(),
+            }),
+        })
+    }
+
+    fn build_synthesis_repair_request(
+        &self,
+        report: &ScoutReport,
+        previous_output: &str,
+        validation_error: &str,
+    ) -> Result<ChatCompletionsRequest> {
+        let context = build_llm_context(report);
+        let context_json = serde_json::to_string_pretty(&context)?;
+        let max_tokens = self.config.max_tokens.min(u32::MAX as usize) as u32;
+
+        Ok(ChatCompletionsRequest {
+            model: self.config.main_model.clone(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: system_prompt().to_string(),
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: format!(
+                        "Repair the previous JSON output so it satisfies the validation rule. Return only the repaired JSON object.\n\nValidation error:\n{validation_error}\n\nPrevious output:\n{previous_output}\n\nAllowed context:\n{context_json}"
+                    ),
+                },
+            ],
+            temperature: Some(0.1),
+            max_tokens: Some(max_tokens),
+            stream: Some(false),
+            response_format: Some(ResponseFormat {
+                r#type: "json_object".to_string(),
+            }),
+        })
+    }
+
+    fn build_search_plan_request(&self, query: &SearchQuery) -> Result<ChatCompletionsRequest> {
+        let max_tokens = self.config.max_tokens.min(2048).min(u32::MAX as usize) as u32;
+        let content = format!(
+            "Create a bounded LitScout-RS search plan for this topic: `{}`.\nReturn only JSON with this shape: {{\"aspects\":[{{\"name\":\"core concept\",\"github_query\":\"...\",\"arxiv_query\":\"...\",\"rationale\":\"...\"}}]}}.\nRules: create 1 to 3 aspects; keep each query short; use only GitHub/arXiv-searchable terms; do not add web sources.",
+            query.topic
+        );
+
+        Ok(ChatCompletionsRequest {
+            model: self.config.side_model.clone(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: "You create small deterministic search plans for a Rust CLI that only queries GitHub and arXiv. Return JSON only."
+                        .to_string(),
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content,
                 },
             ],
             temperature: Some(0.2),
@@ -205,6 +293,61 @@ fn parse_synthesis_content(content: &str) -> Result<LlmSynthesis> {
             "DeepSeek response was not a valid LlmSynthesis JSON object: {err}"
         ))
     })
+}
+
+fn parse_and_validate_synthesis(content: &str, report: &ScoutReport) -> Result<LlmSynthesis> {
+    let synthesis = parse_synthesis_content(content)?;
+    validate_synthesis(&synthesis, report)?;
+    Ok(synthesis)
+}
+
+fn parse_search_plan_content(content: &str, query: &SearchQuery) -> Result<SearchPlan> {
+    let json = strip_json_fence(content);
+    let output = serde_json::from_str::<SearchPlanOutput>(json).map_err(|err| {
+        AppError::Llm(format!(
+            "DeepSeek response was not a valid SearchPlan JSON object: {err}"
+        ))
+    })?;
+
+    let aspects = output
+        .aspects
+        .into_iter()
+        .take(3)
+        .filter_map(|aspect| {
+            let github_query = aspect.github_query.trim().to_string();
+            let arxiv_query = aspect.arxiv_query.trim().to_string();
+            if github_query.is_empty() || arxiv_query.is_empty() {
+                return None;
+            }
+            Some(SearchAspect {
+                name: non_empty_or_default(aspect.name, "llm aspect"),
+                github_query,
+                arxiv_query,
+                rationale: aspect.rationale.filter(|value| !value.trim().is_empty()),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    if aspects.is_empty() {
+        return Err(AppError::Llm(
+            "DeepSeek SearchPlan did not contain usable aspects".to_string(),
+        ));
+    }
+
+    Ok(SearchPlan {
+        original_topic: query.topic.clone(),
+        aspects,
+        llm_generated: true,
+    })
+}
+
+fn non_empty_or_default(value: String, default: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        default.to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn strip_json_fence(content: &str) -> &str {
@@ -356,6 +499,17 @@ pub struct ChatResponseMessage {
     pub reasoning_content: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LlmSynthesisResult {
+    pub synthesis: LlmSynthesis,
+    pub repaired: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SearchPlanOutput {
+    aspects: Vec<SearchAspect>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LlmReportContext {
     topic: String,
@@ -393,8 +547,8 @@ mod tests {
     use chrono::{DateTime, Utc};
 
     use super::{
-        extract_urls, parse_synthesis_content, validate_synthesis, ChatCompletionsRequest,
-        ChatMessage, DeepSeekClient, DeepSeekConfig, ResponseFormat,
+        extract_urls, parse_search_plan_content, parse_synthesis_content, validate_synthesis,
+        ChatCompletionsRequest, ChatMessage, DeepSeekClient, DeepSeekConfig, ResponseFormat,
     };
     use crate::model::{
         ArxivPaper, CitationLedger, GitHubRepo, QualityReport, ScoutReport, SearchPlan,
@@ -468,6 +622,30 @@ mod tests {
 
         assert_eq!(value["response_format"]["type"], "json_object");
         assert_eq!(value["stream"], false);
+    }
+
+    #[test]
+    fn parses_search_plan_json_and_limits_aspects() {
+        let query = SearchQuery {
+            topic: "rust agent framework".to_string(),
+            github_limit: 10,
+            arxiv_limit: 10,
+        };
+        let content = r#"{
+            "aspects": [
+                {"name":"core","github_query":"rust agent framework","arxiv_query":"rust agent framework","rationale":"core"},
+                {"name":"bench","github_query":"agent benchmark rust","arxiv_query":"agent benchmark","rationale":"bench"},
+                {"name":"tools","github_query":"tool calling rust","arxiv_query":"tool calling agents","rationale":"tools"},
+                {"name":"extra","github_query":"extra","arxiv_query":"extra","rationale":"extra"}
+            ]
+        }"#;
+
+        let plan = parse_search_plan_content(content, &query).expect("plan should parse");
+
+        assert!(plan.llm_generated);
+        assert_eq!(plan.original_topic, "rust agent framework");
+        assert_eq!(plan.aspects.len(), 3);
+        assert_eq!(plan.aspects[0].github_query, "rust agent framework");
     }
 
     #[test]

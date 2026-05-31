@@ -61,6 +61,22 @@ pub fn render_markdown(report: &ScoutReport) -> String {
     ));
     out.push('\n');
 
+    out.push_str("### Search Plan\n\n");
+    out.push_str(&format!(
+        "- LLM generated: `{}`\n",
+        report.plan.llm_generated
+    ));
+    for aspect in &report.plan.aspects {
+        out.push_str(&format!(
+            "- `{}`: GitHub `{}`; arXiv `{}`\n",
+            aspect.name, aspect.github_query, aspect.arxiv_query
+        ));
+        if let Some(rationale) = &aspect.rationale {
+            out.push_str(&format!("  - Rationale: {rationale}\n"));
+        }
+    }
+    out.push('\n');
+
     if !report.quality.warnings.is_empty() {
         out.push_str("### Quality Warnings\n\n");
         for warning in &report.quality.warnings {

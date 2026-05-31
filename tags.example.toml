@@ -1,0 +1,27 @@
+[[rules]]
+label = "Agent Framework"
+keywords = ["agent framework", "agentic framework", "multi-agent", "agents"]
+
+[[rules]]
+label = "Tool Calling"
+keywords = ["tool calling", "tool-use", "function calling", "tools"]
+
+[[rules]]
+label = "RAG / Retrieval"
+keywords = ["rag", "retrieval", "retriever", "augmented generation"]
+
+[[rules]]
+label = "Code Agent"
+keywords = ["code agent", "coding agent", "software engineering", "swe"]
+
+[[rules]]
+label = "Web Agent"
+keywords = ["web agent", "browser", "webarena", "web navigation"]
+
+[[rules]]
+label = "Benchmark"
+keywords = ["benchmark", "bench", "evaluation", "eval"]
+
+[[rules]]
+label = "Rust / Systems"
+keywords = ["rust", "systems", "compiler", "cargo"]

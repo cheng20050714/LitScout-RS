@@ -9,6 +9,7 @@ mod model;
 mod quality;
 mod ranking;
 mod report;
+mod session;
 mod sources;
 mod workflow;
 

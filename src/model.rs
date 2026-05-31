@@ -124,7 +124,7 @@ impl From<GitHubRepo> for SourceItem {
 
 impl From<&ArxivPaper> for SourceItem {
     fn from(paper: &ArxivPaper) -> Self {
-        let stable_id = strip_arxiv_version(&paper.arxiv_id);
+        let stable_id = stable_arxiv_id(&paper.arxiv_id);
         Self {
             id: format!("arxiv:{stable_id}"),
             kind: SourceKind::Arxiv,
@@ -283,7 +283,16 @@ fn excerpt(text: &str, max_chars: usize) -> String {
     out
 }
 
-fn strip_arxiv_version(arxiv_id: &str) -> String {
+pub fn arxiv_id_from_abs_url(id_url: &str) -> String {
+    id_url
+        .rsplit_once("/abs/")
+        .map(|(_, id)| id)
+        .unwrap_or(id_url)
+        .trim()
+        .to_string()
+}
+
+pub fn stable_arxiv_id(arxiv_id: &str) -> String {
     let raw = arxiv_id
         .rsplit_once("/abs/")
         .map(|(_, id)| id)

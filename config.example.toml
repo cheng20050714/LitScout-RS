@@ -1,0 +1,26 @@
+# Reference configuration for LitScout-RS.
+# The current CLI reads these values from command-line flags and environment
+# variables; this file documents a stable project configuration profile.
+
+[run]
+github_limit = 10
+arxiv_limit = 10
+output = "reports"
+cache_dir = ".litscout-cache"
+cache_ttl_hours = 24
+session_dir = "sessions"
+tags_file = "tags.example.toml"
+timeout_secs = 30
+enrich = false
+
+[github]
+token_env = "GITHUB_TOKEN"
+
+[llm.deepseek]
+enabled = false
+api_key_env = "DEEPSEEK_API_KEY"
+base_url = "https://api.deepseek.com"
+main_model = "deepseek-v4-pro"
+side_model = "deepseek-v4-flash"
+max_tokens = 4096
+timeout_secs = 30
