@@ -102,7 +102,15 @@ impl DeepSeekClient {
         }
     }
 
-    async fn chat_completions_with_retry(
+    pub async fn translate_report_to_chinese(&self, markdown: &str) -> Result<String> {
+        let request = self.build_translation_request(markdown);
+        let response = self.chat_completions_with_retry(request).await?;
+        let translated = response.first_content()?.to_string();
+        validate_translated_markdown(markdown, &translated)?;
+        Ok(translated)
+    }
+
+    pub(crate) async fn chat_completions_with_retry(
         &self,
         request: ChatCompletionsRequest,
     ) -> Result<ChatCompletionsResponse> {
@@ -141,6 +149,10 @@ impl DeepSeekClient {
         serde_json::from_str(&body).map_err(AppError::from)
     }
 
+    pub(crate) fn side_model(&self) -> String {
+        self.config.side_model.clone()
+    }
+
     fn build_synthesis_request(&self, report: &ScoutReport) -> Result<ChatCompletionsRequest> {
         let context = build_llm_context(report);
         let context_json = serde_json::to_string_pretty(&context)?;
@@ -156,7 +168,7 @@ impl DeepSeekClient {
                 ChatMessage {
                     role: "user".to_string(),
                     content: format!(
-                        "Analyze this LitScout-RS context and return only the requested JSON object.\n\n{context_json}"
+                        "请分析以下 LitScout-RS 上下文，并只返回约定的 JSON 对象。\n\n{context_json}"
                     ),
                 },
             ],
@@ -189,7 +201,7 @@ impl DeepSeekClient {
                 ChatMessage {
                     role: "user".to_string(),
                     content: format!(
-                        "Repair the previous JSON output so it satisfies the validation rule. Return only the repaired JSON object.\n\nValidation error:\n{validation_error}\n\nPrevious output:\n{previous_output}\n\nAllowed context:\n{context_json}"
+                        "请修复上一次 JSON 输出，使其满足校验规则。只返回修复后的 JSON 对象。\n\n校验错误：\n{validation_error}\n\n上一次输出：\n{previous_output}\n\n允许使用的上下文：\n{context_json}"
                     ),
                 },
             ],
@@ -230,10 +242,31 @@ impl DeepSeekClient {
             }),
         })
     }
+
+    fn build_translation_request(&self, markdown: &str) -> ChatCompletionsRequest {
+        let max_tokens = self.config.max_tokens.min(u32::MAX as usize) as u32;
+        ChatCompletionsRequest {
+            model: self.config.main_model.clone(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: "你是 LitScout-RS 的中文报告翻译器。把用户提供的 Markdown 调研报告翻译成自然、准确的中文。必须保留 Markdown 结构、代码样式、repo 名、论文标题、citation id、所有 URL 和链接目标；不得新增来源、不得删除链接、不得解释翻译过程。只输出翻译后的 Markdown。".to_string(),
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: markdown.to_string(),
+                },
+            ],
+            temperature: Some(0.1),
+            max_tokens: Some(max_tokens),
+            stream: Some(false),
+            response_format: None,
+        }
+    }
 }
 
 fn system_prompt() -> &'static str {
-    "You are the LitScout-RS LLM analysis layer. Use only the provided GitHub and arXiv JSON context. Do not browse, do not invent sources, and do not add URLs that are not in the citation ledger. Return a single valid JSON object with exactly these fields: executive_summary: string, key_findings: string[], recommended_reading_path: string[], limitations: string[], used_citation_ids: string[]. Every analytical claim should include Markdown links using the provided citation URLs."
+    "你是 LitScout-RS 的 LLM 分析层。只能使用提供的 GitHub 与 arXiv JSON 上下文；不得联网、不得编造来源、不得添加引用账本之外的 URL。返回单个合法 JSON 对象，字段必须且只能包含：executive_summary: string, key_findings: string[], recommended_reading_path: string[], limitations: string[], used_citation_ids: string[]。executive_summary、key_findings、recommended_reading_path、limitations 必须使用中文；原始 repo 名、论文标题、citation id 和 URL 保持原样。每条分析性结论都应包含 Markdown 链接，链接 URL 必须来自 citation_ledger。"
 }
 
 fn build_llm_context(report: &ScoutReport) -> LlmReportContext {
@@ -260,11 +293,10 @@ fn build_llm_context(report: &ScoutReport) -> LlmReportContext {
         sources,
         citation_ledger: report.citations.citations.clone(),
         required_output: LlmRequiredOutput {
-            executive_summary: "string with Markdown links to citation URLs".to_string(),
-            key_findings: "array of concise findings, each grounded in citation URLs".to_string(),
-            recommended_reading_path: "array of ordered reading steps with citation URLs"
-                .to_string(),
-            limitations: "array of data or coverage limitations".to_string(),
+            executive_summary: "中文摘要，包含指向 citation URL 的 Markdown 链接".to_string(),
+            key_findings: "中文要点数组，每条都应由 citation URL 支撑".to_string(),
+            recommended_reading_path: "中文阅读路径数组，步骤中保留 citation URL".to_string(),
+            limitations: "中文局限性数组，说明数据覆盖或来源限制".to_string(),
             used_citation_ids: "array containing only IDs from citation_ledger".to_string(),
         },
     }
@@ -323,6 +355,8 @@ fn parse_search_plan_content(content: &str, query: &SearchQuery) -> Result<Searc
                 name: non_empty_or_default(aspect.name, "llm aspect"),
                 github_query,
                 arxiv_query,
+                github_limit: split_limit(query.github_limit, 3),
+                arxiv_limit: split_limit(query.arxiv_limit, 3),
                 rationale: aspect.rationale.filter(|value| !value.trim().is_empty()),
             })
         })
@@ -350,7 +384,14 @@ fn non_empty_or_default(value: String, default: &str) -> String {
     }
 }
 
-fn strip_json_fence(content: &str) -> &str {
+fn split_limit(limit: usize, parts: usize) -> usize {
+    if parts == 0 {
+        return limit.max(1);
+    }
+    limit.div_ceil(parts).max(1)
+}
+
+pub(crate) fn strip_json_fence(content: &str) -> &str {
     let trimmed = content.trim();
     if !trimmed.starts_with("```") {
         return trimmed;
@@ -409,6 +450,29 @@ fn validate_synthesis(synthesis: &LlmSynthesis, report: &ScoutReport) -> Result<
     Ok(())
 }
 
+pub(crate) fn validate_translated_markdown(original: &str, translated: &str) -> Result<()> {
+    let original_urls = extract_urls(original).into_iter().collect::<HashSet<_>>();
+    let translated_urls = extract_urls(translated).into_iter().collect::<HashSet<_>>();
+
+    for url in &original_urls {
+        if !translated_urls.contains(url) {
+            return Err(AppError::Llm(format!(
+                "DeepSeek translation dropped source URL: {url}"
+            )));
+        }
+    }
+
+    for url in &translated_urls {
+        if !original_urls.contains(url) {
+            return Err(AppError::Llm(format!(
+                "DeepSeek translation introduced URL outside original report: {url}"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 fn synthesis_text(synthesis: &LlmSynthesis) -> String {
     let mut text = synthesis.executive_summary.clone();
     for field in [
@@ -430,7 +494,10 @@ fn extract_urls(text: &str) -> Vec<String> {
             token.find("http").map(|start| {
                 token[start..]
                     .trim_matches(|ch: char| {
-                        matches!(ch, '(' | ')' | '[' | ']' | '<' | '>' | ',' | '.' | ';')
+                        matches!(
+                            ch,
+                            '(' | ')' | '[' | ']' | '<' | '>' | ',' | '.' | ';' | '。' | '，'
+                        )
                     })
                     .to_string()
             })
@@ -473,7 +540,7 @@ pub struct ChatCompletionsResponse {
 }
 
 impl ChatCompletionsResponse {
-    fn first_content(&self) -> Result<&str> {
+    pub(crate) fn first_content(&self) -> Result<&str> {
         self.choices
             .first()
             .and_then(|choice| choice.message.content.as_deref())
@@ -548,7 +615,8 @@ mod tests {
 
     use super::{
         extract_urls, parse_search_plan_content, parse_synthesis_content, validate_synthesis,
-        ChatCompletionsRequest, ChatMessage, DeepSeekClient, DeepSeekConfig, ResponseFormat,
+        validate_translated_markdown, ChatCompletionsRequest, ChatMessage, DeepSeekClient,
+        DeepSeekConfig, ResponseFormat,
     };
     use crate::model::{
         ArxivPaper, CitationLedger, GitHubRepo, QualityReport, ScoutReport, SearchPlan,
@@ -600,6 +668,25 @@ mod tests {
         let urls = extract_urls("See [repo](https://github.com/acme/rust-agent).");
 
         assert_eq!(urls, vec!["https://github.com/acme/rust-agent"]);
+    }
+
+    #[test]
+    fn validates_translation_preserves_urls() {
+        let original = "See [repo](https://github.com/acme/rust-agent).";
+        let translated = "参见 [repo](https://github.com/acme/rust-agent)。";
+
+        validate_translated_markdown(original, translated).expect("same URL should pass");
+    }
+
+    #[test]
+    fn rejects_translation_that_adds_new_url() {
+        let original = "See [repo](https://github.com/acme/rust-agent).";
+        let translated = "参见 [repo](https://github.com/acme/rust-agent) 和 https://example.com。";
+
+        let err = validate_translated_markdown(original, translated)
+            .expect_err("new URL should be rejected");
+
+        assert!(err.to_string().contains("introduced URL"));
     }
 
     #[test]

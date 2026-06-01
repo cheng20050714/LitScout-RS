@@ -1,49 +1,25 @@
 # LitScout-RS
 
-LitScout-RS is a Rust CLI research scouting tool for GitHub repositories and arXiv papers. It takes a technical topic, fetches metadata from the official GitHub and arXiv APIs, deduplicates and ranks the results, classifies them with simple rules, and writes a Markdown report with source links.
+LitScout-RS 是一个以 Rust 为核心的研究侦察 Agent。当前主线不再维护离线 mock 或无 LLM 版本，项目目标是通过 DeepSeek 生成搜索计划，并真实调用 GitHub API 与 arXiv API 抓取主题资料，最后生成带引用链接的中文 Markdown 调研报告。
 
-## Usage
+## 核心工作流
 
-```bash
-cargo run -- "rust agent framework"
-cargo run -- "retrieval augmented generation" --github-limit 10 --arxiv-limit 10
-cargo run -- "code agent benchmark" --output reports/agent.md
-cargo run -- "rag" --no-cache
-cargo run -- "llm tool calling" --llm
-cargo run -- "rust agent framework" --tags-file tags.example.toml
-cargo run -- "rust agent framework" --enrich
+```text
+中文调研主题
+  -> DeepSeek 生成可审查 SearchPlan
+  -> 用户确认或修改 GitHub/arXiv 查询方向
+  -> Rust 后端并发抓取 GitHub 与 arXiv
+  -> 去重、排序、分类、构建 CitationLedger
+  -> DeepSeek 基于已抓取结构化数据生成中文分析
+  -> 质量门检查引用、URL 和来源覆盖
+  -> 生成中文 Markdown 报告
+  -> 可选：报告生成后再次调用 DeepSeek 翻译为中文
+  -> 可选：基于报告内容进行流式追问
 ```
 
-Useful environment variables:
+LLM 只能分析 LitScout-RS 已抓取到的 GitHub/arXiv 数据，不允许自行联网、编造来源或修改原始引用。
 
-```bash
-export GITHUB_TOKEN=...
-export DEEPSEEK_API_KEY=...
-```
-
-`GITHUB_TOKEN` is optional but recommended to reduce GitHub API rate-limit issues.
-
-Reports are written to `reports/<topic>-<timestamp>.md` by default. Each run also writes a session JSON record under `sessions/` unless the session directory is changed with `--session-dir`.
-
-## Configuration Files
-
-- `.env.example` lists supported environment variables.
-- `config.example.toml` documents a stable project profile for demos and reports.
-- `tags.example.toml` defines the external classification dictionary format.
-
-Custom tags:
-
-```bash
-cargo run -- "code agent benchmark" --tags-file tags.example.toml
-```
-
-## DeepSeek LLM Agent Mode
-
-`--llm` enables the DeepSeek-backed analysis layer. DeepSeek first creates a bounded SearchPlan with at most three GitHub/arXiv query aspects. After deterministic retrieval, ranking, classification, and citation construction, DeepSeek generates the analysis section.
-
-DeepSeek only receives the structured GitHub/arXiv context produced by LitScout-RS. It is instructed not to browse, invent sources, or add URLs outside the citation ledger. If its output drops source URLs or references unknown citations, the quality gate records a warning or the synthesis is rejected.
-
-Configure with environment variables:
+## 环境变量
 
 ```bash
 export DEEPSEEK_API_KEY=...
@@ -52,9 +28,25 @@ export DEEPSEEK_MODEL=deepseek-v4-pro
 export DEEPSEEK_SIDE_MODEL=deepseek-v4-flash
 export DEEPSEEK_MAX_TOKENS=4096
 export DEEPSEEK_TIMEOUT_SECS=30
+
+# 可选，但建议配置以提升 GitHub API rate limit
+export GITHUB_TOKEN=...
 ```
 
-Or pass CLI arguments:
+不要把真实 API Key 写入代码、README、日志或提交记录。
+
+## CLI 运行
+
+CLI 模式需要启用 `--llm`：
+
+```bash
+cargo run -- "rust agent framework" --llm
+cargo run -- "llm tool calling" --llm --github-limit 10 --arxiv-limit 10
+cargo run -- "code agent benchmark" --llm --output reports/agent.md
+cargo run -- "retrieval augmented generation" --llm --no-cache
+```
+
+也可以直接传入 DeepSeek 参数：
 
 ```bash
 cargo run -- "rust agent framework" --llm \
@@ -66,37 +58,87 @@ cargo run -- "rust agent framework" --llm \
   --llm-max-tokens 4096
 ```
 
-Short form:
+报告默认写入 `reports/<topic>-<timestamp>.md`，每次运行还会在 `sessions/` 写入不包含密钥的 session JSON。
+
+## Web 工作台
+
+先构建前端：
 
 ```bash
-DEEPSEEK_API_KEY=... cargo run -- "llm tool calling" --llm
+cd web
+npm install
+npm run build
+cd ..
 ```
 
-If `--llm` is enabled without an API key, the program returns a clear configuration error instead of pretending that LLM synthesis succeeded.
+启动 Rust 服务：
 
-If DeepSeek synthesis fails citation validation, LitScout-RS sends one repair prompt. If repair still fails, the deterministic report is kept and the warning is recorded.
+```bash
+cargo run -- --serve --port 3000
+```
 
-## Examples And Demo
+打开：
 
-- Rule-based sample: `examples/sample_report.md`
-- LLM-assisted sample: `examples/sample_llm_report.md`
-- Demo script: `scripts/demo.sh`
-- Demo slide outline: `docs/demo_slides.md`
+```text
+http://127.0.0.1:3000
+```
 
-## Rust Features Demonstrated
+Web 工作台包含两个阶段：
 
-- `tokio::join!` for concurrent GitHub/arXiv requests.
-- `reqwest` for GitHub, arXiv, and DeepSeek HTTP calls.
-- `serde` for API responses, cache, session JSON, and LLM JSON output.
-- `roxmltree` for arXiv Atom XML parsing.
-- `clap` for CLI parsing.
-- `thiserror` for typed errors.
-- Modular source, ranking, classification, report, quality, session, and LLM modules.
+1. 配置阶段：填写 DeepSeek API Key、GitHub Token、DeepSeek base URL 和模型名。
+2. 调研阶段：输入中文 prompt，生成 SearchPlan，编辑搜索方向，启动 GitHub/arXiv 调研，查看进度和报告。
 
-## Development Checks
+当前 Web 能力：
+
+- 中文 SearchPlan 生成与修订。
+- GitHub/arXiv 抓取进度通过 SSE 事件展示。
+- 中文 Markdown 报告预览。
+- CitationLedger 引用账本展示。
+- 报告生成后可选调用 DeepSeek 翻译为中文，翻译结果会校验原始 URL 是否保留。
+- 报告追问支持流式展示，并用 Markdown 渲染回答。
+
+## API 摘要
+
+- `GET /api/health`：检查后端状态。
+- `POST /api/plan`：生成中文 SearchPlan。
+- `POST /api/plan/revise`：根据用户反馈修改 SearchPlan。
+- `POST /api/run`：执行调研并一次性返回报告。
+- `POST /api/run/stream`：执行调研并通过 SSE 返回分阶段事件。
+- `POST /api/report/translate`：将报告翻译为中文并校验引用 URL。
+- `POST /api/report/chat`：基于报告进行一次性问答。
+- `POST /api/report/chat/stream`：基于报告进行流式问答。
+
+## Rust 特性
+
+- `tokio::join!` 并发请求 GitHub 与 arXiv。
+- `reqwest` 调用 GitHub、arXiv 和 DeepSeek。
+- `serde` 处理 API、缓存、session、LLM JSON。
+- `roxmltree` 解析 arXiv Atom XML。
+- `clap` 构建 CLI。
+- `thiserror` 管理统一错误类型。
+- `axum` 提供 Web API 与 SSE 事件流。
+- 本地 JSON 缓存减少重复请求。
+- 模块化组织 source、ranking、classification、report、quality、session、LLM。
+
+## 开发检查
+
+Rust：
 
 ```bash
 cargo fmt
 cargo check
 cargo test
 ```
+
+前端：
+
+```bash
+cd web
+npm run build
+```
+
+## 当前限制
+
+- 数据源仍限定为 GitHub 和 arXiv。
+- 不做任意网页爬虫、浏览器 Agent、PDF 全文解析或自由 ReAct。
+- 报告追问接口已经是 SSE 流式形态；当前实现是后端获得完整回答后按 Markdown 段落推送，后续可替换为 DeepSeek 原生 token streaming。

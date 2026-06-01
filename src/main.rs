@@ -1,3 +1,4 @@
+mod agent;
 mod cache;
 mod classify;
 mod cli;
@@ -9,6 +10,7 @@ mod model;
 mod quality;
 mod ranking;
 mod report;
+mod server;
 mod session;
 mod sources;
 mod workflow;
@@ -18,6 +20,7 @@ use tracing::warn;
 
 use crate::cli::Cli;
 use crate::config::{AppConfig, LlmConfig};
+use crate::error::AppError;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -30,13 +33,26 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
     let app_config = AppConfig::from_cli(&cli)?;
-    let llm_config = LlmConfig::from_cli(&cli);
+    let mut llm_config = LlmConfig::from_cli(&cli);
+    if cli.serve {
+        llm_config.enabled = true;
+    } else if !llm_config.enabled {
+        return Err(AppError::InvalidConfig(
+            "LitScout-RS 当前主线需要启用 LLM：请添加 --llm 并配置 DEEPSEEK_API_KEY。".to_string(),
+        )
+        .into());
+    }
 
     if app_config.github_token.is_none() {
         warn!("No GitHub token provided; using unauthenticated GitHub API access.");
     }
 
-    let output_path = workflow::run(cli.into_query(), app_config, llm_config).await?;
+    if cli.serve {
+        server::serve(app_config, llm_config, cli.port).await?;
+        return Ok(());
+    }
+
+    let output_path = workflow::run(cli.into_query()?, app_config, llm_config).await?;
     println!("Report written to {}", output_path.display());
 
     Ok(())

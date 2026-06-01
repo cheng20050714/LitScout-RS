@@ -38,75 +38,71 @@ pub async fn write_markdown(report: &ScoutReport, output_path: &Path) -> Result<
 
 pub fn render_markdown(report: &ScoutReport) -> String {
     let mut out = String::new();
-    out.push_str(&format!("# LitScout-RS Report: {}\n\n", report.query.topic));
-
-    out.push_str("## 1. Query Summary\n\n");
-    out.push_str(&format!("- Topic: `{}`\n", report.query.topic));
     out.push_str(&format!(
-        "- GitHub limit: `{}`\n",
+        "# LitScout-RS 调研报告：{}\n\n",
+        report.query.topic
+    ));
+
+    out.push_str("## 1. 查询概要\n\n");
+    out.push_str(&format!("- 调研主题：`{}`\n", report.query.topic));
+    out.push_str(&format!(
+        "- GitHub 目标数量：`{}`\n",
         report.query.github_limit
     ));
-    out.push_str(&format!("- arXiv limit: `{}`\n", report.query.arxiv_limit));
     out.push_str(&format!(
-        "- GitHub repositories collected: `{}`\n",
+        "- arXiv 目标数量：`{}`\n",
+        report.query.arxiv_limit
+    ));
+    out.push_str(&format!(
+        "- 已收集 GitHub 仓库：`{}`\n",
         report.github_repos.len()
     ));
     out.push_str(&format!(
-        "- arXiv papers collected: `{}`\n",
+        "- 已收集 arXiv 论文：`{}`\n",
         report.arxiv_papers.len()
     ));
     out.push_str(&format!(
-        "- Ranked source items: `{}`\n",
+        "- 去重排序后来源：`{}`\n",
         report.ranked_items.len()
     ));
     out.push('\n');
 
-    out.push_str("### Search Plan\n\n");
+    out.push_str("## 2. 搜索计划\n\n");
     out.push_str(&format!(
-        "- LLM generated: `{}`\n",
+        "- 是否由 LLM 生成：`{}`\n",
         report.plan.llm_generated
     ));
     for aspect in &report.plan.aspects {
         out.push_str(&format!(
-            "- `{}`: GitHub `{}`; arXiv `{}`\n",
+            "- `{}`：GitHub `{}`；arXiv `{}`\n",
             aspect.name, aspect.github_query, aspect.arxiv_query
         ));
         if let Some(rationale) = &aspect.rationale {
-            out.push_str(&format!("  - Rationale: {rationale}\n"));
+            out.push_str(&format!("  - 规划理由：{rationale}\n"));
         }
     }
     out.push('\n');
 
-    if !report.quality.warnings.is_empty() {
-        out.push_str("### Quality Warnings\n\n");
-        for warning in &report.quality.warnings {
-            out.push_str(&format!("- {warning}\n"));
-        }
-        out.push('\n');
-    }
-
-    out.push_str("## 2. Highlights\n\n");
+    out.push_str("## 3. 关键发现\n\n");
     if let Some(synthesis) = &report.llm_synthesis {
-        out.push_str(
-            "LLM-assisted synthesis based only on collected GitHub and arXiv sources.\n\n",
-        );
+        out.push_str("以下内容由 DeepSeek 基于本次已抓取的 GitHub 与 arXiv 结构化来源生成。\n\n");
         out.push_str(&format!("{}\n\n", synthesis.executive_summary));
         for finding in &synthesis.key_findings {
             out.push_str(&format!("- {finding}\n"));
         }
         if !synthesis.limitations.is_empty() {
-            out.push_str("\nLimitations:\n\n");
+            out.push_str("\n### 局限性\n\n");
             for limitation in &synthesis.limitations {
                 out.push_str(&format!("- {limitation}\n"));
             }
         }
         out.push('\n');
     } else if report.ranked_items.is_empty() {
-        out.push_str("No highlights are available because no source items were collected.\n\n");
+        out.push_str("未收集到可用于总结的来源。\n\n");
     } else {
         for item in report.ranked_items.iter().take(5) {
             out.push_str(&format!(
-                "- [{}]({}) ({}, score {:.2})\n",
+                "- [{}]({})（{}，分数 {:.2}）\n",
                 item.title,
                 item.url,
                 source_kind_label(item.kind),
@@ -116,15 +112,15 @@ pub fn render_markdown(report: &ScoutReport) -> String {
         out.push('\n');
     }
 
-    out.push_str("## 3. GitHub Repositories\n\n");
+    out.push_str("## 4. GitHub 开源仓库\n\n");
     render_items(&mut out, &report.ranked_items, SourceKind::GitHub);
 
-    out.push_str("## 4. arXiv Papers\n\n");
+    out.push_str("## 5. arXiv 论文\n\n");
     render_items(&mut out, &report.ranked_items, SourceKind::Arxiv);
 
-    out.push_str("## 5. Topic Clusters\n\n");
+    out.push_str("## 6. 主题聚类\n\n");
     if report.groups.is_empty() {
-        out.push_str("No topic clusters were generated.\n\n");
+        out.push_str("未生成主题聚类。\n\n");
     } else {
         for group in &report.groups {
             if group.item_ids.is_empty() {
@@ -140,17 +136,17 @@ pub fn render_markdown(report: &ScoutReport) -> String {
         }
     }
 
-    out.push_str("## 6. Observations\n\n");
+    out.push_str("## 7. 综合观察\n\n");
     render_observations(&mut out, report);
 
-    out.push_str("## 7. Suggested Reading Path\n\n");
+    out.push_str("## 8. 推荐阅读路径\n\n");
     if let Some(synthesis) = &report.llm_synthesis {
         for step in &synthesis.recommended_reading_path {
             out.push_str(&format!("- {step}\n"));
         }
         out.push('\n');
     } else if report.ranked_items.is_empty() {
-        out.push_str("No reading path can be suggested without collected sources.\n\n");
+        out.push_str("没有来源时无法推荐阅读路径。\n\n");
     } else {
         for (index, item) in report.ranked_items.iter().take(6).enumerate() {
             out.push_str(&format!("{}. [{}]({})\n", index + 1, item.title, item.url));
@@ -158,9 +154,9 @@ pub fn render_markdown(report: &ScoutReport) -> String {
         out.push('\n');
     }
 
-    out.push_str("## 8. Citation Ledger\n\n");
+    out.push_str("## 9. 引用账本\n\n");
     if report.citations.citations.is_empty() {
-        out.push_str("No citations recorded.\n\n");
+        out.push_str("未记录引用。\n\n");
     } else {
         for citation in &report.citations.citations {
             out.push_str(&format!(
@@ -174,18 +170,28 @@ pub fn render_markdown(report: &ScoutReport) -> String {
         out.push('\n');
     }
 
-    out.push_str("## 9. Run Metadata\n\n");
-    out.push_str(&format!("- Generated at: `{}`\n", report.generated_at));
+    out.push_str("## 10. 运行元数据\n\n");
+    out.push_str(&format!("- 生成时间：`{}`\n", report.generated_at));
     out.push_str(&format!(
-        "- Search plan generated by LLM: `{}`\n",
+        "- 搜索计划由 LLM 生成：`{}`\n",
         report.plan.llm_generated
     ));
-    out.push_str(&format!("- Quality passed: `{}`\n", report.quality.passed));
+    out.push_str(&format!("- 质量门通过：`{}`\n", report.quality.passed));
     out.push_str(&format!(
-        "- Citation count: `{}`\n",
+        "- 引用数量：`{}`\n",
         report.citations.citations.len()
     ));
     out.push('\n');
+
+    out.push_str("## 11. 质量警告\n\n");
+    if report.quality.warnings.is_empty() {
+        out.push_str("本次运行未产生质量警告。\n\n");
+    } else {
+        for warning in &report.quality.warnings {
+            out.push_str(&format!("- {warning}\n"));
+        }
+        out.push('\n');
+    }
 
     out
 }
@@ -195,19 +201,19 @@ fn render_items(out: &mut String, items: &[SourceItem], kind: SourceKind) {
     for item in items.iter().filter(|item| item.kind == kind) {
         rendered = true;
         out.push_str(&format!("### [{}]({})\n\n", item.title, item.url));
-        out.push_str(&format!("- Type: `{}`\n", source_kind_label(item.kind)));
-        out.push_str(&format!("- Score: `{:.2}`\n", item.score));
-        out.push_str(&format!("- Tags: `{}`\n", display_tags(&item.tags)));
-        out.push_str(&format!("- Source URL: <{}>\n", item.url));
+        out.push_str(&format!("- 类型：`{}`\n", source_kind_label(item.kind)));
+        out.push_str(&format!("- 分数：`{:.2}`\n", item.score));
+        out.push_str(&format!("- 标签：`{}`\n", display_tags(&item.tags)));
+        out.push_str(&format!("- 来源链接：<{}>\n", item.url));
         if !item.score_reasons.is_empty() {
             out.push_str(&format!(
-                "- Score reasons: `{}`\n",
+                "- 排序原因：`{}`\n",
                 item.score_reasons.join("; ")
             ));
         }
         if !item.classification_reasons.is_empty() {
             out.push_str(&format!(
-                "- Classification reasons: `{}`\n",
+                "- 分类原因：`{}`\n",
                 item.classification_reasons.join("; ")
             ));
         }
@@ -216,13 +222,13 @@ fn render_items(out: &mut String, items: &[SourceItem], kind: SourceKind) {
     }
 
     if !rendered {
-        out.push_str("No items collected for this source.\n\n");
+        out.push_str("该来源没有收集到条目。\n\n");
     }
 }
 
 fn render_observations(out: &mut String, report: &ScoutReport) {
     if report.ranked_items.is_empty() {
-        out.push_str("- No source data was available for observation.\n\n");
+        out.push_str("- 当前没有可用于观察的来源数据。\n\n");
         return;
     }
 
@@ -238,11 +244,11 @@ fn render_observations(out: &mut String, report: &ScoutReport) {
         .count();
 
     out.push_str(&format!(
-        "- The report contains `{github_count}` GitHub items and `{arxiv_count}` arXiv items after normalization.\n"
+        "- 归一化后，本报告包含 `{github_count}` 个 GitHub 条目和 `{arxiv_count}` 个 arXiv 条目。\n"
     ));
     if let Some(top) = report.ranked_items.first() {
         out.push_str(&format!(
-            "- Highest ranked source: [{}]({}) with score `{:.2}`.\n",
+            "- 当前排序最高的来源是 [{}]({})，分数为 `{:.2}`。\n",
             top.title, top.url, top.score
         ));
     }
@@ -258,7 +264,7 @@ fn source_kind_label(kind: SourceKind) -> &'static str {
 
 fn display_tags(tags: &[String]) -> String {
     if tags.is_empty() {
-        "none".to_string()
+        "无".to_string()
     } else {
         tags.join(", ")
     }
@@ -345,16 +351,18 @@ mod tests {
         let markdown = render_markdown(&report);
 
         for section in [
-            "# LitScout-RS Report: rust agent framework",
-            "## 1. Query Summary",
-            "## 2. Highlights",
-            "## 3. GitHub Repositories",
-            "## 4. arXiv Papers",
-            "## 5. Topic Clusters",
-            "## 6. Observations",
-            "## 7. Suggested Reading Path",
-            "## 8. Citation Ledger",
-            "## 9. Run Metadata",
+            "# LitScout-RS 调研报告：rust agent framework",
+            "## 1. 查询概要",
+            "## 2. 搜索计划",
+            "## 3. 关键发现",
+            "## 4. GitHub 开源仓库",
+            "## 5. arXiv 论文",
+            "## 6. 主题聚类",
+            "## 7. 综合观察",
+            "## 8. 推荐阅读路径",
+            "## 9. 引用账本",
+            "## 10. 运行元数据",
+            "## 11. 质量警告",
         ] {
             assert!(markdown.contains(section), "missing section {section}");
         }
@@ -375,8 +383,8 @@ mod tests {
 
         let markdown = render_markdown(&report);
 
-        assert!(markdown.contains("LLM-assisted synthesis"));
-        assert!(markdown.contains("Limitations:"));
+        assert!(markdown.contains("DeepSeek"));
+        assert!(markdown.contains("### 局限性"));
     }
 
     fn sample_report() -> ScoutReport {

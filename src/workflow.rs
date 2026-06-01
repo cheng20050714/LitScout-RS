@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use crate::config::{AppConfig, LlmConfig};
@@ -19,11 +20,91 @@ use crate::{cache, classify, quality, ranking};
 const GITHUB_SOURCE: &str = "github";
 const ARXIV_SOURCE: &str = "arxiv";
 
+#[derive(Debug, Clone)]
+pub struct WorkflowRunResult {
+    pub output_path: PathBuf,
+    pub session_path: Option<PathBuf>,
+    pub report: ScoutReport,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "event", content = "data", rename_all = "snake_case")]
+pub enum WorkflowEvent {
+    FetchStarted {
+        source: String,
+    },
+    SourceFinished {
+        source: String,
+        count: usize,
+    },
+    RankingFinished {
+        total: usize,
+    },
+    ClassificationFinished {
+        total: usize,
+    },
+    SynthesisStarted,
+    QualityWarning {
+        message: String,
+    },
+    ReportReady {
+        output_report: String,
+        session_path: Option<String>,
+    },
+}
+
 pub async fn run(
     query: SearchQuery,
     app_config: AppConfig,
     llm_config: LlmConfig,
 ) -> Result<PathBuf> {
+    Ok(run_for_report(query, app_config, llm_config)
+        .await?
+        .output_path)
+}
+
+pub async fn run_for_report(
+    query: SearchQuery,
+    app_config: AppConfig,
+    llm_config: LlmConfig,
+) -> Result<WorkflowRunResult> {
+    let mut emit = |_| {};
+    run_inner(query, None, app_config, llm_config, &mut emit).await
+}
+
+pub async fn run_with_plan_for_report(
+    query: SearchQuery,
+    plan: SearchPlan,
+    app_config: AppConfig,
+    llm_config: LlmConfig,
+) -> Result<WorkflowRunResult> {
+    let mut emit = |_| {};
+    run_inner(query, Some(plan), app_config, llm_config, &mut emit).await
+}
+
+pub async fn run_with_plan_events<F>(
+    query: SearchQuery,
+    plan: SearchPlan,
+    app_config: AppConfig,
+    llm_config: LlmConfig,
+    mut emit: F,
+) -> Result<WorkflowRunResult>
+where
+    F: FnMut(WorkflowEvent),
+{
+    run_inner(query, Some(plan), app_config, llm_config, &mut emit).await
+}
+
+async fn run_inner<F>(
+    query: SearchQuery,
+    explicit_plan: Option<SearchPlan>,
+    app_config: AppConfig,
+    llm_config: LlmConfig,
+    emit: &mut F,
+) -> Result<WorkflowRunResult>
+where
+    F: FnMut(WorkflowEvent),
+{
     ensure_llm_ready(&llm_config)?;
 
     if app_config.use_cache {
@@ -31,35 +112,62 @@ pub async fn run(
     }
 
     let mut warnings = Vec::new();
-    let plan = match generate_search_plan(&query, &llm_config).await {
-        Ok(plan) => plan,
-        Err(err) => {
-            let message = format!("DeepSeek SearchPlan failed: {err}; using original topic.");
-            warn!("{message}");
-            warnings.push(message);
-            SearchPlan::from_query(&query)
-        }
+    let plan = match explicit_plan {
+        Some(plan) => plan,
+        None => match generate_search_plan(&query, &llm_config).await {
+            Ok(plan) => plan,
+            Err(err) => {
+                let message = format!("DeepSeek SearchPlan failed: {err}; using original topic.");
+                warn!("{message}");
+                warnings.push(message);
+                SearchPlan::from_query(&query)
+            }
+        },
     };
 
+    emit(WorkflowEvent::FetchStarted {
+        source: GITHUB_SOURCE.to_string(),
+    });
+    emit(WorkflowEvent::FetchStarted {
+        source: ARXIV_SOURCE.to_string(),
+    });
     let (github_result, arxiv_result) = tokio::join!(
         fetch_github_with_cache_for_plan(&plan, &query, &app_config),
         fetch_arxiv_with_cache_for_plan(&plan, &query, &app_config)
     );
 
     let (github_repos, github_ok) = match github_result {
-        Ok(repos) => (repos, true),
+        Ok(repos) => {
+            emit(WorkflowEvent::SourceFinished {
+                source: GITHUB_SOURCE.to_string(),
+                count: repos.len(),
+            });
+            (repos, true)
+        }
         Err(err) => {
             let message = format!("GitHub fetch failed: {err}");
             warn!("{message}");
+            emit(WorkflowEvent::QualityWarning {
+                message: message.clone(),
+            });
             warnings.push(message);
             (Vec::new(), false)
         }
     };
     let (arxiv_papers, arxiv_ok) = match arxiv_result {
-        Ok(papers) => (papers, true),
+        Ok(papers) => {
+            emit(WorkflowEvent::SourceFinished {
+                source: ARXIV_SOURCE.to_string(),
+                count: papers.len(),
+            });
+            (papers, true)
+        }
         Err(err) => {
             let message = format!("arXiv fetch failed: {err}");
             warn!("{message}");
+            emit(WorkflowEvent::QualityWarning {
+                message: message.clone(),
+            });
             warnings.push(message);
             (Vec::new(), false)
         }
@@ -79,6 +187,7 @@ pub async fn run(
         github_repos,
         arxiv_papers,
         warnings,
+        emit,
     )
     .await
 }
@@ -89,14 +198,14 @@ async fn fetch_github_with_cache_for_plan(
     config: &AppConfig,
 ) -> Result<Vec<GitHubRepo>> {
     let aspects = bounded_aspects(plan);
-    let per_aspect_limit = split_limit(query.github_limit, aspects.len());
     let mut repos = Vec::new();
     let mut failures = Vec::new();
 
     for aspect in aspects {
+        let github_limit = aspect.github_limit.max(1);
         let aspect_query = SearchQuery {
             topic: aspect.github_query.clone(),
-            github_limit: per_aspect_limit,
+            github_limit,
             arxiv_limit: query.arxiv_limit,
         };
         match fetch_github_with_cache(&aspect_query, config).await {
@@ -122,15 +231,15 @@ async fn fetch_arxiv_with_cache_for_plan(
     config: &AppConfig,
 ) -> Result<Vec<ArxivPaper>> {
     let aspects = bounded_aspects(plan);
-    let per_aspect_limit = split_limit(query.arxiv_limit, aspects.len());
     let mut papers = Vec::new();
     let mut failures = Vec::new();
 
     for aspect in aspects {
+        let arxiv_limit = aspect.arxiv_limit.max(1);
         let aspect_query = SearchQuery {
             topic: aspect.arxiv_query.clone(),
             github_limit: query.github_limit,
-            arxiv_limit: per_aspect_limit,
+            arxiv_limit,
         };
         match fetch_arxiv_with_cache(&aspect_query, config).await {
             Ok(mut items) => papers.append(&mut items),
@@ -151,13 +260,6 @@ async fn fetch_arxiv_with_cache_for_plan(
 
 fn bounded_aspects(plan: &SearchPlan) -> Vec<&crate::model::SearchAspect> {
     plan.aspects.iter().take(3).collect()
-}
-
-fn split_limit(limit: usize, parts: usize) -> usize {
-    if parts == 0 {
-        return limit.max(1);
-    }
-    limit.div_ceil(parts).max(1)
 }
 
 async fn fetch_github_with_cache(
@@ -206,7 +308,8 @@ async fn build_and_write_report(
     github_repos: Vec<GitHubRepo>,
     arxiv_papers: Vec<ArxivPaper>,
     mut warnings: Vec<String>,
-) -> Result<PathBuf> {
+    emit: &mut impl FnMut(WorkflowEvent),
+) -> Result<WorkflowRunResult> {
     ensure_llm_ready(&llm_config)?;
 
     let mut source_items = github_repos
@@ -218,7 +321,13 @@ async fn build_and_write_report(
     let rules = classify::load_rules(app_config.tags_file.as_deref())?;
     let deduped_items = dedup::dedup_by_id(source_items);
     let mut ranked_items = ranking::rank_items(&query, deduped_items);
+    emit(WorkflowEvent::RankingFinished {
+        total: ranked_items.len(),
+    });
     classify::classify_items_with_rules(&mut ranked_items, &rules);
+    emit(WorkflowEvent::ClassificationFinished {
+        total: ranked_items.len(),
+    });
     let groups = classify::group_by_tags(&ranked_items, &rules);
     let citations = CitationLedger::from_items(&ranked_items);
 
@@ -237,6 +346,7 @@ async fn build_and_write_report(
 
     let mut llm_repaired = false;
     if llm_config.enabled {
+        emit(WorkflowEvent::SynthesisStarted);
         match synthesize_with_deepseek(&llm_config, &report).await {
             Ok(result) => {
                 llm_repaired = result.repaired;
@@ -245,6 +355,9 @@ async fn build_and_write_report(
             Err(err) => {
                 let message = format!("DeepSeek synthesis failed: {err}; using rule-based report.");
                 warn!("{message}");
+                emit(WorkflowEvent::QualityWarning {
+                    message: message.clone(),
+                });
                 warnings.push(message);
             }
         }
@@ -261,6 +374,11 @@ async fn build_and_write_report(
         report.quality.passed = false;
         report.quality.warnings.extend(warnings);
     }
+    for warning in &report.quality.warnings {
+        emit(WorkflowEvent::QualityWarning {
+            message: warning.clone(),
+        });
+    }
 
     let output_path = report::write_markdown(&report, &app_config.output).await?;
     let session_path =
@@ -271,8 +389,16 @@ async fn build_and_write_report(
                 None
             }
         };
+    emit(WorkflowEvent::ReportReady {
+        output_report: output_path.display().to_string(),
+        session_path: session_path.as_ref().map(|path| path.display().to_string()),
+    });
     print_run_summary(&report, &output_path, session_path.as_ref());
-    Ok(output_path)
+    Ok(WorkflowRunResult {
+        output_path,
+        session_path,
+        report,
+    })
 }
 
 fn ensure_llm_ready(llm_config: &LlmConfig) -> Result<()> {
@@ -366,7 +492,8 @@ mod tests {
         };
         let llm_config = LlmConfig::from_env(false, 30);
 
-        let path = build_and_write_report(
+        let mut events = Vec::new();
+        let result = build_and_write_report(
             query,
             plan,
             config,
@@ -374,15 +501,20 @@ mod tests {
             vec![sample_repo()],
             vec![sample_paper()],
             Vec::new(),
+            &mut |event| events.push(event),
         )
         .await
         .expect("mock workflow should write a report");
 
-        let markdown = std::fs::read_to_string(path).expect("report should be readable");
-        assert!(markdown.contains("# LitScout-RS Report: rust agent framework"));
+        let markdown =
+            std::fs::read_to_string(result.output_path).expect("report should be readable");
+        assert!(markdown.contains("# LitScout-RS 调研报告：rust agent framework"));
         assert!(markdown.contains("https://github.com/acme/rust-agent"));
         assert!(markdown.contains("https://arxiv.org/abs/2501.00001"));
-        assert!(markdown.contains("## 8. Citation Ledger"));
+        assert!(markdown.contains("## 9. 引用账本"));
+        assert!(events
+            .iter()
+            .any(|event| matches!(event, super::WorkflowEvent::ReportReady { .. })));
     }
 
     #[tokio::test]
@@ -415,6 +547,7 @@ mod tests {
             timeout_secs: 30,
         };
 
+        let mut emit = |_| {};
         let err = build_and_write_report(
             query,
             plan,
@@ -423,6 +556,7 @@ mod tests {
             vec![sample_repo()],
             vec![sample_paper()],
             Vec::new(),
+            &mut emit,
         )
         .await
         .expect_err("missing DeepSeek key should fail clearly");

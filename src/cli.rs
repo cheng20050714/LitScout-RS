@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
+use crate::error::{AppError, Result};
 use crate::model::SearchQuery;
 
 #[derive(Debug, Clone, Parser)]
@@ -12,7 +13,7 @@ use crate::model::SearchQuery;
 )]
 pub struct Cli {
     #[arg(help = "Research topic to scout")]
-    pub topic: String,
+    pub topic: Option<String>,
 
     #[arg(long, default_value_t = 10, help = "Maximum GitHub repositories")]
     pub github_limit: usize,
@@ -65,7 +66,10 @@ pub struct Cli {
     #[arg(long, default_value_t = 30, help = "HTTP timeout in seconds")]
     pub timeout: u64,
 
-    #[arg(long, help = "Enable optional LLM-assisted synthesis")]
+    #[arg(
+        long,
+        help = "Enable the required DeepSeek LLM planning and synthesis layer"
+    )]
     pub llm: bool,
 
     #[arg(
@@ -102,16 +106,39 @@ pub struct Cli {
     #[arg(long, help = "Enable optional GitHub enrichment in later stages")]
     pub enrich: bool,
 
+    #[arg(long, help = "Start the web workbench instead of one-shot CLI mode")]
+    pub serve: bool,
+
+    #[arg(
+        long,
+        default_value_t = 3000,
+        help = "Port for web workbench serve mode"
+    )]
+    pub port: u16,
+
+    #[arg(
+        long,
+        hide = true,
+        help = "Deprecated; LitScout-RS now requires LLM + live network sources"
+    )]
+    pub mock: bool,
+
     #[arg(long, env = "GITHUB_TOKEN", hide_env_values = true)]
     pub github_token: Option<String>,
 }
 
 impl Cli {
-    pub fn into_query(self) -> SearchQuery {
-        SearchQuery {
-            topic: self.topic,
+    pub fn into_query(self) -> Result<SearchQuery> {
+        let topic = self.topic.ok_or_else(|| {
+            AppError::InvalidConfig(
+                "a topic is required unless --serve mode is enabled".to_string(),
+            )
+        })?;
+
+        Ok(SearchQuery {
+            topic,
             github_limit: self.github_limit,
             arxiv_limit: self.arxiv_limit,
-        }
+        })
     }
 }

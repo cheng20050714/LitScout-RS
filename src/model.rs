@@ -23,6 +23,8 @@ impl SearchPlan {
                 name: "default".to_string(),
                 github_query: query.topic.clone(),
                 arxiv_query: query.topic.clone(),
+                github_limit: query.github_limit,
+                arxiv_limit: query.arxiv_limit,
                 rationale: None,
             }],
             llm_generated: false,
@@ -35,6 +37,10 @@ pub struct SearchAspect {
     pub name: String,
     pub github_query: String,
     pub arxiv_query: String,
+    #[serde(default)]
+    pub github_limit: usize,
+    #[serde(default)]
+    pub arxiv_limit: usize,
     pub rationale: Option<String>,
 }
 

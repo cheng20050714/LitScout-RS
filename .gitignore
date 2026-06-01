@@ -5,3 +5,5 @@ cache/
 reports/
 sessions/
 .env
+web/dist/
+web/node_modules/
