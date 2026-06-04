@@ -3,7 +3,9 @@
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use reqwest::header::RETRY_AFTER;
 use roxmltree::{Document, Node};
+use tracing::warn;
 
 use crate::config::AppConfig;
 use crate::error::{AppError, Result};
@@ -12,6 +14,7 @@ use crate::model::{arxiv_id_from_abs_url, ArxivPaper, SearchQuery};
 const ARXIV_API_URL: &str = "https://export.arxiv.org/api/query";
 const ATOM_NS: &str = "http://www.w3.org/2005/Atom";
 const USER_AGENT_VALUE: &str = "litscout-rs/0.1";
+const ARXIV_MAX_ATTEMPTS: usize = 3;
 
 pub async fn search_papers(query: &SearchQuery, config: &AppConfig) -> Result<Vec<ArxivPaper>> {
     let client = reqwest::Client::builder()
@@ -29,19 +32,73 @@ pub async fn search_papers(query: &SearchQuery, config: &AppConfig) -> Result<Ve
         ("sortOrder", "descending".to_string()),
     ];
 
-    let response = client.get(ARXIV_API_URL).query(&params).send().await?;
-    let status = response.status();
-    let body = response.text().await?;
+    let mut last_error = None;
+    for attempt in 1..=ARXIV_MAX_ATTEMPTS {
+        match client.get(ARXIV_API_URL).query(&params).send().await {
+            Ok(response) => {
+                let status = response.status();
+                let retry_after = retry_after_delay(response.headers().get(RETRY_AFTER));
+                let body = response.text().await?;
 
-    if !status.is_success() {
-        return Err(AppError::HttpStatus {
-            service: "arXiv",
-            status: status.as_u16(),
-            body,
-        });
+                if status.is_success() {
+                    return parse_arxiv_atom(&body);
+                }
+
+                if status.as_u16() == 429 {
+                    let delay = retry_after
+                        .unwrap_or_else(|| arxiv_backoff_delay(attempt))
+                        .min(Duration::from_secs(30));
+                    let err = AppError::RateLimit {
+                        service: "arXiv",
+                        reset: format!("; retry after about {}s", delay.as_secs()),
+                    };
+                    if attempt < ARXIV_MAX_ATTEMPTS {
+                        warn!(
+                            "arXiv rate limited request on attempt {attempt}/{ARXIV_MAX_ATTEMPTS}; retrying after {:?}",
+                            delay
+                        );
+                        last_error = Some(err);
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+                    return Err(err);
+                }
+
+                return Err(AppError::HttpStatus {
+                    service: "arXiv",
+                    status: status.as_u16(),
+                    body,
+                });
+            }
+            Err(err) if attempt < ARXIV_MAX_ATTEMPTS => {
+                let delay = arxiv_backoff_delay(attempt);
+                warn!(
+                    "arXiv request failed on attempt {attempt}/{ARXIV_MAX_ATTEMPTS}; retrying after {:?}: {err}",
+                    delay
+                );
+                last_error = Some(AppError::Http(err));
+                tokio::time::sleep(delay).await;
+            }
+            Err(err) => return Err(AppError::Http(err)),
+        }
     }
 
-    parse_arxiv_atom(&body)
+    Err(last_error.unwrap_or_else(|| AppError::Workflow("arXiv request failed".to_string())))
+}
+
+fn arxiv_backoff_delay(attempt: usize) -> Duration {
+    Duration::from_secs(match attempt {
+        0 | 1 => 3,
+        2 => 8,
+        _ => 15,
+    })
+}
+
+fn retry_after_delay(value: Option<&reqwest::header::HeaderValue>) -> Option<Duration> {
+    value
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_secs)
 }
 
 pub fn parse_arxiv_atom(xml: &str) -> Result<Vec<ArxivPaper>> {
@@ -168,7 +225,11 @@ fn decode_common_entities(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_arxiv_atom;
+    use std::time::Duration;
+
+    use reqwest::header::HeaderValue;
+
+    use super::{parse_arxiv_atom, retry_after_delay};
 
     #[test]
     fn parses_arxiv_atom_fixture() {
@@ -191,5 +252,15 @@ mod tests {
         );
         assert_eq!(papers[1].arxiv_id, "2501.00001");
         assert!(papers[1].pdf_url.is_none());
+    }
+
+    #[test]
+    fn parses_retry_after_seconds() {
+        let value = HeaderValue::from_static("7");
+
+        assert_eq!(
+            retry_after_delay(Some(&value)),
+            Some(Duration::from_secs(7))
+        );
     }
 }

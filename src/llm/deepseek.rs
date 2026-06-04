@@ -1,6 +1,9 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 use std::time::Duration;
 
+use regex::Regex;
+use reqwest::header::ACCEPT_ENCODING;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -14,6 +17,7 @@ use crate::model::{
 const DEFAULT_BASE_URL: &str = "https://api.deepseek.com";
 const CHAT_COMPLETIONS_PATH: &str = "chat/completions";
 const MAX_CONTEXT_ITEMS: usize = 20;
+const DEEPSEEK_MAX_ATTEMPTS: usize = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DeepSeekConfig {
@@ -114,14 +118,25 @@ impl DeepSeekClient {
         &self,
         request: ChatCompletionsRequest,
     ) -> Result<ChatCompletionsResponse> {
-        match self.chat_completions(request.clone()).await {
-            Ok(response) => Ok(response),
-            Err(first_err) => {
-                warn!("DeepSeek request failed, retrying once: {first_err}");
-                tokio::time::sleep(Duration::from_millis(250)).await;
-                self.chat_completions(request).await
+        let mut last_err = None;
+        for attempt in 1..=DEEPSEEK_MAX_ATTEMPTS {
+            match self.chat_completions(request.clone()).await {
+                Ok(response) => return Ok(response),
+                Err(err) if attempt < DEEPSEEK_MAX_ATTEMPTS => {
+                    let delay = Duration::from_millis(500 * attempt as u64);
+                    warn!(
+                        "DeepSeek request failed on attempt {attempt}/{DEEPSEEK_MAX_ATTEMPTS}, retrying after {:?}: {err}",
+                        delay
+                    );
+                    last_err = Some(err);
+                    tokio::time::sleep(delay).await;
+                }
+                Err(err) => return Err(err),
             }
         }
+        Err(last_err.unwrap_or_else(|| {
+            AppError::Llm("DeepSeek request failed without an error payload".to_string())
+        }))
     }
 
     pub async fn chat_completions(
@@ -132,6 +147,7 @@ impl DeepSeekClient {
             .http
             .post(self.config.chat_completions_url())
             .bearer_auth(&self.config.api_key)
+            .header(ACCEPT_ENCODING, "identity")
             .json(&request)
             .send()
             .await?;
@@ -489,21 +505,49 @@ fn synthesis_text(synthesis: &LlmSynthesis) -> String {
 }
 
 fn extract_urls(text: &str) -> Vec<String> {
-    text.split_whitespace()
-        .filter_map(|token| {
-            token.find("http").map(|start| {
-                token[start..]
-                    .trim_matches(|ch: char| {
-                        matches!(
-                            ch,
-                            '(' | ')' | '[' | ']' | '<' | '>' | ',' | '.' | ';' | '。' | '，'
-                        )
-                    })
-                    .to_string()
-            })
-        })
+    static URL_RE: OnceLock<Regex> = OnceLock::new();
+    let url_re = URL_RE.get_or_init(|| {
+        Regex::new(r#"https?://[A-Za-z0-9._~:/?#@!$&*+,;=%-]+"#).expect("URL regex should compile")
+    });
+
+    url_re
+        .find_iter(text)
+        .map(|match_| trim_url(match_.as_str()).to_string())
         .filter(|url| url.starts_with("http://") || url.starts_with("https://"))
         .collect()
+}
+
+fn trim_url(url: &str) -> &str {
+    url.trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '(' | ')'
+                | '['
+                | ']'
+                | '<'
+                | '>'
+                | ','
+                | '.'
+                | ';'
+                | ':'
+                | '!'
+                | '?'
+                | '。'
+                | '，'
+                | '；'
+                | '：'
+                | '！'
+                | '？'
+                | '、'
+                | '）'
+                | '】'
+                | '》'
+                | '」'
+                | '』'
+                | '”'
+                | '’'
+        )
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -668,6 +712,15 @@ mod tests {
         let urls = extract_urls("See [repo](https://github.com/acme/rust-agent).");
 
         assert_eq!(urls, vec!["https://github.com/acme/rust-agent"]);
+    }
+
+    #[test]
+    fn extracts_urls_before_chinese_markdown_punctuation() {
+        let urls = extract_urls(
+            "参考 [CoCoEmo](https://github.com/wsssy/CoCoEmo)，其中介绍了论文“CoCoEmo”。",
+        );
+
+        assert_eq!(urls, vec!["https://github.com/wsssy/CoCoEmo"]);
     }
 
     #[test]

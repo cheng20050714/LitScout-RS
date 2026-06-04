@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -19,6 +20,7 @@ use crate::{cache, classify, quality, ranking};
 
 const GITHUB_SOURCE: &str = "github";
 const ARXIV_SOURCE: &str = "arxiv";
+const ARXIV_ASPECT_DELAY: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone)]
 pub struct WorkflowRunResult {
@@ -147,9 +149,6 @@ where
         Err(err) => {
             let message = format!("GitHub fetch failed: {err}");
             warn!("{message}");
-            emit(WorkflowEvent::QualityWarning {
-                message: message.clone(),
-            });
             warnings.push(message);
             (Vec::new(), false)
         }
@@ -165,9 +164,6 @@ where
         Err(err) => {
             let message = format!("arXiv fetch failed: {err}");
             warn!("{message}");
-            emit(WorkflowEvent::QualityWarning {
-                message: message.clone(),
-            });
             warnings.push(message);
             (Vec::new(), false)
         }
@@ -234,7 +230,10 @@ async fn fetch_arxiv_with_cache_for_plan(
     let mut papers = Vec::new();
     let mut failures = Vec::new();
 
-    for aspect in aspects {
+    for (index, aspect) in aspects.iter().enumerate() {
+        if index > 0 {
+            tokio::time::sleep(ARXIV_ASPECT_DELAY).await;
+        }
         let arxiv_limit = aspect.arxiv_limit.max(1);
         let aspect_query = SearchQuery {
             topic: aspect.arxiv_query.clone(),
@@ -355,9 +354,6 @@ async fn build_and_write_report(
             Err(err) => {
                 let message = format!("DeepSeek synthesis failed: {err}; using rule-based report.");
                 warn!("{message}");
-                emit(WorkflowEvent::QualityWarning {
-                    message: message.clone(),
-                });
                 warnings.push(message);
             }
         }
