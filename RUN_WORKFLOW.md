@@ -20,6 +20,12 @@ npm run build
 cd ..
 ```
 
+改了 Stage 3 agent 控制环：
+
+```bash
+node scripts/stage3_eval.mjs
+```
+
 启动 Web 工作台：
 
 ```bash
@@ -127,15 +133,20 @@ http://127.0.0.1:3001
 
 1. 阶段 1：填写 DeepSeek API Key。
 2. 可选填写 GitHub Token；如果不确定是否有效，先留空。
-3. 保存配置进入调研阶段。
-4. 输入中文调研主题。
-5. 点击生成 SearchPlan。
-6. 检查并修改 GitHub/arXiv 查询方向。
-7. 点击开始调研。
-8. 在右侧事件流观察 GitHub/arXiv 抓取、排序、分类、LLM 综合进度。
-9. 报告生成后查看 Markdown 渲染结果。
-10. 可选点击“用 LLM 翻译为中文”。
-11. 可在“追问”页对报告继续提问。
+3. 保存配置进入 Agent 阶段。
+4. 输入中文研究问题，设置 GitHub/arXiv 预算和章节上限。
+5. 点击“创建 Agent Run”，生成 ResearchBrief、ChapterPlan 和 QueryPortfolio。
+6. 在“计划”页检查并修改章节、GitHub queries、arXiv queries。
+7. 点击“保存计划修订”会写入新的 PlanReady checkpoint。
+8. 点击“批准并开始调研”，后端会进入 `Fetching -> EvidenceReady -> SynthesisReady -> Completed`。
+9. 右侧 Run Timeline 会显示状态机、事件流和 checkpoint。
+10. “证据”页查看 EvidenceMemory、query lineage 和抓取错误。
+11. “覆盖”页查看 QueryGap / SourceGap。
+12. “审计”页查看 CitationAudit 结果。
+13. “报告”页查看 Markdown 渲染结果。
+14. 可选点击“用 LLM 翻译为中文”。
+15. 可在“追问”页基于当前 EvidenceMemory 和报告继续提问。
+16. 如需回退，在右侧 PlanReady checkpoint 点击“创建分支”；旧 run 不会被修改。
 
 ## 7. CLI 运行
 
@@ -208,6 +219,7 @@ cargo run -- "TTS 调研" --llm --llm-timeout 60
 cargo fmt
 cargo check
 cargo test
+node scripts/stage3_eval.mjs
 cd web
 npm run build
 cd ..

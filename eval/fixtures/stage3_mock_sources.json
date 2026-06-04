@@ -1,0 +1,22 @@
+{
+  "rust-agent-framework": {
+    "github": ["async-openai/async-openai", "rig-rs/rig", "loco-rs/loco"],
+    "arxiv": ["AgentBench", "ToolLLM", "SWE-agent"]
+  },
+  "text-to-speech-2025": {
+    "github": ["myshell-ai/OpenVoice", "SWivid/F5-TTS", "FunAudioLLM/CosyVoice"],
+    "arxiv": ["CosyVoice", "F5-TTS", "NaturalSpeech 3"]
+  },
+  "llm-evaluation-benchmark": {
+    "github": ["openai/evals", "EleutherAI/lm-evaluation-harness", "stanford-crfm/helm"],
+    "arxiv": ["HELM", "Chatbot Arena", "MT-Bench"]
+  },
+  "rust-web-framework": {
+    "github": ["tokio-rs/axum", "actix/actix-web", "rust-lang/rust"],
+    "arxiv": ["Rust web performance", "systems language safety", "async runtime evaluation"]
+  },
+  "attention-mechanism": {
+    "github": ["Dao-AILab/flash-attention", "facebookresearch/xformers", "huggingface/transformers"],
+    "arxiv": ["Attention Is All You Need", "FlashAttention", "Linear Attention"]
+  }
+}

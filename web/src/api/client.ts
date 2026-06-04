@@ -2,12 +2,22 @@ import type {
   FrontendConfig,
   HealthResponse,
   ChatStreamEvent,
+  ChapterNode,
+  CheckpointListResponse,
+  CitationAuditResponse,
+  CoverageResponse,
+  EvidenceResponse,
   PlanRequest,
   PlanResponse,
+  QueryPortfolio,
   ReportTranslateResponse,
   ReportChatResponse,
+  RunPolicy,
   RunEvent,
-  RunResponse
+  RunResponse,
+  StatefulFollowupResponse,
+  StatefulRunResponse,
+  StatefulRunStreamEvent
 } from "./types";
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -109,6 +119,109 @@ export async function runResearchStream(
     throw new Error("调研流结束但没有收到报告。");
   }
   return finalResponse;
+}
+
+export async function createStatefulRun(
+  topic: string,
+  policy: RunPolicy,
+  config: FrontendConfig
+): Promise<StatefulRunResponse> {
+  const response = await fetch("/api/runs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ topic, policy, config })
+  });
+  return readJson<StatefulRunResponse>(response);
+}
+
+export async function reviseStatefulPlan(
+  runId: string,
+  chapters: ChapterNode[],
+  queryPortfolio: QueryPortfolio[],
+  userFeedback: string
+): Promise<StatefulRunResponse> {
+  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/revise-plan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chapters,
+      query_portfolio: queryPortfolio,
+      user_feedback: userFeedback
+    })
+  });
+  return readJson<StatefulRunResponse>(response);
+}
+
+export async function continueStatefulRunStream(
+  runId: string,
+  onEvent: (event: StatefulRunStreamEvent) => void
+): Promise<StatefulRunResponse> {
+  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/approve-plan`, {
+    method: "POST"
+  });
+  if (!response.ok || !response.body) {
+    return readJson<StatefulRunResponse>(response);
+  }
+  let finalResponse: StatefulRunResponse | null = null;
+  await readSse(response, (event) => {
+    const runEvent = event as StatefulRunStreamEvent;
+    onEvent(runEvent);
+    if (runEvent.event === "run_ready") {
+      finalResponse = runEvent.data as StatefulRunResponse;
+    }
+    if (runEvent.event === "run_failed") {
+      const data = runEvent.data as { error?: string };
+      throw new Error(data.error ?? "Stateful run 执行失败。");
+    }
+  });
+  if (!finalResponse) {
+    throw new Error("Stateful run 流结束但没有收到最终状态。");
+  }
+  return finalResponse;
+}
+
+export async function getStatefulEvidence(runId: string): Promise<EvidenceResponse> {
+  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/evidence`);
+  return readJson<EvidenceResponse>(response);
+}
+
+export async function getStatefulCoverage(runId: string): Promise<CoverageResponse> {
+  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/coverage`);
+  return readJson<CoverageResponse>(response);
+}
+
+export async function getStatefulCitationAudit(runId: string): Promise<CitationAuditResponse> {
+  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/citation-audit`);
+  return readJson<CitationAuditResponse>(response);
+}
+
+export async function getStatefulCheckpoints(runId: string): Promise<CheckpointListResponse> {
+  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/checkpoints`);
+  return readJson<CheckpointListResponse>(response);
+}
+
+export async function branchStatefulRun(
+  runId: string,
+  checkpointId: string
+): Promise<StatefulRunResponse> {
+  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/branch-from-checkpoint`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ checkpoint_id: checkpointId })
+  });
+  return readJson<StatefulRunResponse>(response);
+}
+
+export async function askStatefulRun(
+  runId: string,
+  question: string
+): Promise<StatefulFollowupResponse> {
+  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/follow-up`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question })
+  });
+  return readJson<StatefulFollowupResponse>(response);
 }
 
 export async function askReport(

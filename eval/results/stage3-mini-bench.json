@@ -1,0 +1,111 @@
+{
+  "generated_at": "1970-01-01T00:00:00.000Z",
+  "benchmark": "stage3-mini-bench",
+  "state_path": [
+    "created",
+    "plan_ready",
+    "fetching",
+    "evidence_ready",
+    "synthesis_ready",
+    "completed"
+  ],
+  "total_cases": 5,
+  "passed_cases": 5,
+  "passed": true,
+  "notes": [
+    "该 mini bench 使用 fixture/mock 数据验证 Stage 3 控制环结构，不替代真实 GitHub/arXiv 网络抓取。",
+    "用户主流程仍要求 DeepSeek + GitHub/arXiv；fixture 仅用于回归测试。"
+  ],
+  "cases": [
+    {
+      "id": "rust-agent-framework",
+      "topic_zh": "Rust Agent Framework 的开源项目和论文调研",
+      "expected_chapters": 3,
+      "source_kinds": [
+        "github",
+        "arxiv"
+      ],
+      "checks": {
+        "has_research_brief": true,
+        "has_chapter_plan": true,
+        "has_query_portfolio": true,
+        "has_evidence_memory": true,
+        "has_coverage_report": true,
+        "has_citation_audit": true
+      },
+      "passed": true
+    },
+    {
+      "id": "text-to-speech-2025",
+      "topic_zh": "2025 年 TTS 领域最新开源项目和论文",
+      "expected_chapters": 3,
+      "source_kinds": [
+        "github",
+        "arxiv"
+      ],
+      "checks": {
+        "has_research_brief": true,
+        "has_chapter_plan": true,
+        "has_query_portfolio": true,
+        "has_evidence_memory": true,
+        "has_coverage_report": true,
+        "has_citation_audit": true
+      },
+      "passed": true
+    },
+    {
+      "id": "llm-evaluation-benchmark",
+      "topic_zh": "LLM Evaluation Benchmark 的方法和工具调研",
+      "expected_chapters": 3,
+      "source_kinds": [
+        "github",
+        "arxiv"
+      ],
+      "checks": {
+        "has_research_brief": true,
+        "has_chapter_plan": true,
+        "has_query_portfolio": true,
+        "has_evidence_memory": true,
+        "has_coverage_report": true,
+        "has_citation_audit": true
+      },
+      "passed": true
+    },
+    {
+      "id": "rust-web-framework",
+      "topic_zh": "Rust Web Framework 生态和性能研究",
+      "expected_chapters": 3,
+      "source_kinds": [
+        "github",
+        "arxiv"
+      ],
+      "checks": {
+        "has_research_brief": true,
+        "has_chapter_plan": true,
+        "has_query_portfolio": true,
+        "has_evidence_memory": true,
+        "has_coverage_report": true,
+        "has_citation_audit": true
+      },
+      "passed": true
+    },
+    {
+      "id": "attention-mechanism",
+      "topic_zh": "Attention Mechanism 近年改进与开源实现",
+      "expected_chapters": 3,
+      "source_kinds": [
+        "github",
+        "arxiv"
+      ],
+      "checks": {
+        "has_research_brief": true,
+        "has_chapter_plan": true,
+        "has_query_portfolio": true,
+        "has_evidence_memory": true,
+        "has_coverage_report": true,
+        "has_citation_audit": true
+      },
+      "passed": true
+    }
+  ]
+}

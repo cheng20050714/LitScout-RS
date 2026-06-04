@@ -1,2 +1,13 @@
+pub mod arxiv_scout;
+pub mod citation_auditor;
+pub mod coverage_critic;
+pub mod evidence;
+pub mod followup_router;
+pub mod github_scout;
+pub mod middleware;
+pub mod orchestrator;
+pub mod plan_critic;
 pub mod planner;
 pub mod report_chat;
+pub mod scoper;
+pub mod writer;

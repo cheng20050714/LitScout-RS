@@ -1,5 +1,6 @@
 mod agent;
 mod cache;
+mod checkpoint;
 mod classify;
 mod cli;
 mod config;
@@ -10,10 +11,13 @@ mod model;
 mod quality;
 mod ranking;
 mod report;
+mod run_policy;
 mod server;
 mod session;
 mod sources;
+mod trace;
 mod workflow;
+mod workflow_state;
 
 use clap::Parser;
 use tracing::warn;

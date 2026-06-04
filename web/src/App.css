@@ -281,6 +281,12 @@ input {
   padding: 9px 12px;
 }
 
+input[type="checkbox"] {
+  width: auto;
+  min-height: 0;
+  accent-color: var(--accent);
+}
+
 textarea:focus,
 input:focus,
 button:focus-visible {
@@ -338,6 +344,10 @@ button:focus-visible {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 22px;
+}
+
+.tabbar.agent-tabs {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .tabbar button {
@@ -422,6 +432,11 @@ button:focus-visible {
   padding: 16px;
 }
 
+.chapter-card {
+  display: grid;
+  gap: 14px;
+}
+
 .step-number {
   display: inline-flex;
   align-items: center;
@@ -494,6 +509,195 @@ button:focus-visible {
 .status-list dd {
   margin: 4px 0 0;
   font-weight: 900;
+}
+
+.switch-row,
+.action-row,
+.evidence-card-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.switch-row {
+  padding: 12px;
+  border: 2px solid var(--line);
+  border-radius: 16px;
+  background: #fffaf0;
+}
+
+.switch-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 900;
+}
+
+.action-row {
+  justify-content: flex-end;
+}
+
+.brief-grid,
+.plan-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.brief-grid {
+  margin: 0 0 16px;
+}
+
+.brief-grid div,
+.plan-metrics div {
+  padding: 12px;
+  border: 2px solid rgba(43, 40, 31, 0.22);
+  border-radius: 14px;
+  background: #fffaf0;
+}
+
+.brief-grid dt,
+.plan-metrics span {
+  display: block;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.brief-grid dd {
+  margin: 6px 0 0;
+  line-height: 1.55;
+}
+
+.plan-metrics strong {
+  display: block;
+  margin-top: 4px;
+  font-family: "DIN Condensed", "Avenir Next Condensed", sans-serif;
+  font-size: 28px;
+}
+
+.brief-lists {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.brief-lists ul,
+.phase-card ul {
+  margin-bottom: 0;
+  padding-left: 1.1rem;
+  line-height: 1.6;
+}
+
+.evidence-section {
+  display: grid;
+  gap: 14px;
+}
+
+.evidence-grid,
+.gap-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.evidence-card,
+.gap-card {
+  min-width: 0;
+  padding: 14px;
+  border: 2px solid var(--line);
+  border-radius: 16px;
+  background: #fffaf0;
+}
+
+.evidence-card h3 {
+  margin-top: 10px;
+  line-height: 1.3;
+}
+
+.lineage-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.lineage-list span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 5px 8px;
+  border: 2px solid rgba(43, 40, 31, 0.22);
+  border-radius: 999px;
+  background: var(--paper);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.timeline-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline-list li {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 2px solid rgba(43, 40, 31, 0.24);
+  border-radius: 14px;
+  background: #fffaf0;
+}
+
+.timeline-list li span {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--line);
+  border-radius: 50%;
+  background: var(--paper);
+  font-weight: 900;
+}
+
+.timeline-list li.done span,
+.timeline-list li.active span {
+  background: var(--signal);
+  color: #fff8eb;
+}
+
+.timeline-list li.active {
+  border-color: var(--accent);
+  box-shadow: 4px 4px 0 rgba(217, 71, 43, 0.18);
+}
+
+.timeline-list li.blocked {
+  opacity: 0.55;
+}
+
+.checkpoint-list {
+  display: grid;
+  gap: 10px;
+}
+
+.checkpoint-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border: 2px solid rgba(43, 40, 31, 0.22);
+  border-radius: 14px;
+  background: #fffaf0;
+}
+
+.checkpoint-row p {
+  margin: 4px 0 0;
+  font-size: 12px;
 }
 
 .event-log pre {
@@ -637,7 +841,19 @@ a {
 
   .limit-grid,
   .status-list,
-  .tabbar {
+  .tabbar,
+  .tabbar.agent-tabs,
+  .brief-grid,
+  .brief-lists,
+  .plan-metrics,
+  .evidence-grid,
+  .gap-list {
     grid-template-columns: 1fr;
+  }
+
+  .action-row,
+  .checkpoint-row {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

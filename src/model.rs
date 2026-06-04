@@ -72,7 +72,7 @@ pub struct ArxivPaper {
     pub pdf_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum SourceKind {
     GitHub,
@@ -276,6 +276,194 @@ pub struct ScoutReport {
     pub citations: CitationLedger,
     pub llm_synthesis: Option<LlmSynthesis>,
     pub quality: QualityReport,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ResearchBrief {
+    pub topic: String,
+    pub user_intent: String,
+    pub target_audience: String,
+    pub time_scope: String,
+    pub inclusion_criteria: Vec<String>,
+    pub exclusion_criteria: Vec<String>,
+    pub success_criteria: Vec<String>,
+}
+
+impl ResearchBrief {
+    pub fn from_topic(topic: &str) -> Self {
+        Self {
+            topic: topic.to_string(),
+            user_intent: format!("围绕 `{topic}` 进行 GitHub 与 arXiv 双源技术调研"),
+            target_audience: "需要快速理解技术生态、论文进展和开源实现的中文研究者".to_string(),
+            time_scope: "优先近期活跃项目和近年论文；保留关键基础工作".to_string(),
+            inclusion_criteria: vec![
+                "GitHub 仓库必须来自 GitHub API 抓取结果".to_string(),
+                "论文必须来自 arXiv API 抓取结果".to_string(),
+                "报告结论必须由 CitationLedger 中的来源支撑".to_string(),
+            ],
+            exclusion_criteria: vec![
+                "不进行任意网页搜索".to_string(),
+                "不引用 GitHub/arXiv 之外的新 URL".to_string(),
+                "不执行 LLM 生成代码".to_string(),
+            ],
+            success_criteria: vec![
+                "形成可审查的章节计划".to_string(),
+                "每条证据可追溯到 query attempt 和 source item".to_string(),
+                "最终中文报告保留可点击引用".to_string(),
+            ],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChapterNode {
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub title_zh: String,
+    pub research_question: String,
+    pub required_evidence_kinds: Vec<String>,
+    pub evidence_quota: usize,
+    pub sort_order: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QueryPortfolio {
+    pub chapter_id: String,
+    pub github_queries: Vec<String>,
+    pub arxiv_queries: Vec<String>,
+    pub rationale: String,
+    pub budget: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QueryAttempt {
+    pub query_id: String,
+    pub source: String,
+    pub query: String,
+    pub chapter_id: String,
+    pub round: usize,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub result_count: usize,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EvidenceItem {
+    pub evidence_id: String,
+    pub source_item_id: String,
+    pub citation_id: String,
+    pub chapter_ids: Vec<String>,
+    pub query_attempt_ids: Vec<String>,
+    pub source_kind: SourceKind,
+    pub title: String,
+    pub url: String,
+    pub evidence_note_zh: String,
+    pub evidence_snippet: String,
+    pub support_score: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct EvidenceMemory {
+    pub items: Vec<EvidenceItem>,
+    pub query_attempts: Vec<QueryAttempt>,
+}
+
+impl EvidenceMemory {
+    pub fn by_chapter(&self, chapter_id: &str) -> Vec<EvidenceItem> {
+        self.items
+            .iter()
+            .filter(|item| item.chapter_ids.iter().any(|id| id == chapter_id))
+            .cloned()
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GapKind {
+    QueryGap,
+    SourceGap,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CoverageRecommendation {
+    NoAction,
+    SuggestNewQuery,
+    OutOfScope,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CoverageGap {
+    pub chapter_id: String,
+    pub gap_kind: GapKind,
+    pub explanation: String,
+    pub recommended_queries: Vec<String>,
+    pub severity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CoverageReport {
+    pub gaps: Vec<CoverageGap>,
+    pub out_of_scope_notice: Vec<String>,
+    pub overall_coverage_score: f64,
+    pub recommendation: CoverageRecommendation,
+}
+
+impl CoverageReport {
+    pub fn pass() -> Self {
+        Self {
+            gaps: Vec::new(),
+            out_of_scope_notice: Vec::new(),
+            overall_coverage_score: 1.0,
+            recommendation: CoverageRecommendation::NoAction,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ParagraphWithCitations {
+    pub text_zh: String,
+    pub cited_evidence_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChapterDraft {
+    pub chapter_id: String,
+    pub title_zh: String,
+    pub paragraphs: Vec<ParagraphWithCitations>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReportDraft {
+    pub title_zh: String,
+    pub chapters: Vec<ChapterDraft>,
+    pub global_summary_zh: String,
+    pub written_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CitationAuditReport {
+    pub url_whitelist_passed: bool,
+    pub citation_coverage_ratio: f64,
+    pub source_diversity_score: f64,
+    pub freshness_warnings: Vec<String>,
+    pub unsupported_paragraph_warnings: Vec<String>,
+    pub external_url_violations: Vec<String>,
+}
+
+impl CitationAuditReport {
+    pub fn pass() -> Self {
+        Self {
+            url_whitelist_passed: true,
+            citation_coverage_ratio: 1.0,
+            source_diversity_score: 1.0,
+            freshness_warnings: Vec::new(),
+            unsupported_paragraph_warnings: Vec::new(),
+            external_url_violations: Vec::new(),
+        }
+    }
 }
 
 fn excerpt(text: &str, max_chars: usize) -> String {

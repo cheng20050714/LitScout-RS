@@ -1,63 +1,80 @@
-# LitScout-RS Implementation Notes
+# LitScout-RS 实现说明
 
-## Current Scope
+## 当前主线
 
-This implementation follows `../PROJECT_PLAN.md` and starts with a CLI-first MVP.
+LitScout-RS 当前主线是 DeepSeek + GitHub/arXiv 网络抓取驱动的中文研究侦察 Agent。项目不维护离线产品模式，也不维护无 LLM 主流程；fixture/mock 只用于测试和 mini bench。
 
-The current build covers:
+## 兼容工作流
 
-- Rust CLI application.
-- Module layout for config, errors, models, workflow, sources, ranking, classification, deduplication, cache, report, quality, and DeepSeek LLM synthesis.
-- Core data structures for GitHub repositories, arXiv papers, unified source items, citations, reports, quality checks, and LLM config.
-- Conversion from `GitHubRepo` and `ArxivPaper` into `SourceItem`.
-- GitHub repository search through the official REST API.
-- arXiv search through the official Atom API with XML parsing.
-- Local JSON cache keyed by query, source, and limit.
-- Exact stable-ID deduplication, rule ranking, rule classification, citation ledger, and Markdown report rendering.
-- Main workflow with concurrent GitHub/arXiv fetching and partial success.
-- Optional DeepSeek-backed report synthesis through an OpenAI-compatible chat completions request.
-- Optional DeepSeek SearchPlan generation with at most three bounded query aspects.
-- One DeepSeek repair attempt when synthesis fails citation validation.
-- LLM output validation that rejects missing citation IDs, dropped source URLs, and URLs outside the citation ledger.
-- Session JSON records that omit GitHub and DeepSeek API keys.
-- Unit tests and fixture tests for models, parsers, cache, ranking, classification, report rendering, quality gates, and no-network workflow execution.
+仍然保留旧的线性 workflow：
 
-## MVP Boundary
+1. CLI 输入中文主题。
+2. 可选调用 DeepSeek 生成 SearchPlan。
+3. 并发抓取 GitHub 与 arXiv。
+4. 去重、排序、分类和 CitationLedger 构建。
+5. DeepSeek 基于结构化来源生成中文分析。
+6. 写入 Markdown 报告和 session JSON。
 
-The target MVP is:
+旧端点 `/api/plan`、`/api/run/stream`、`/api/report/chat`、`/api/report/translate` 保持兼容。
 
-1. Parse a user topic from CLI.
-2. Concurrently query GitHub and arXiv.
-3. Parse repository and paper metadata.
-4. Normalize into `SourceItem`.
-5. Deduplicate, rank, classify.
-6. Generate a Markdown report with source links.
-7. Support cache, logging, and graceful errors.
-8. Keep LLM support optional.
+## Stage 3 Stateful Agent Workflow
 
-## Current Strategy
+第三阶段新增 `/api/runs/*` stateful workflow，核心模块：
 
-The MVP path is now implemented as a CLI-first pipeline:
+- `workflow_state.rs`：`Created -> PlanReady -> Fetching -> EvidenceReady -> SynthesisReady -> Completed` 状态机。
+- `run_policy.rs`：预算、章节上限、LLM 调用上限和可跳过节点。
+- `trace.rs`：状态转移、LLM 节点 hash、工具调用、coverage gap、checkpoint 的 jsonl trace。
+- `checkpoint.rs`：不含 API key 的 checkpoint snapshot。
+- `agent/orchestrator.rs`：状态化编排器。
+- `agent/scoper.rs`：生成 ResearchBrief。
+- `agent/planner.rs`：生成扁平 ChapterPlan 和 QueryPortfolio。
+- `agent/plan_critic.rs`：检查计划结构和查询覆盖。
+- `agent/github_scout.rs` / `agent/arxiv_scout.rs`：受控双源抓取。
+- `agent/evidence.rs`：构建 EvidenceMemory 和 query lineage。
+- `agent/coverage_critic.rs`：输出 QueryGap / SourceGap。
+- `agent/writer.rs`：根据 EvidenceMemory 生成中文报告草稿。
+- `agent/citation_auditor.rs`：粗粒度 URL 白名单、引用覆盖和来源多样性审计。
+- `agent/followup_router.rs`：基于当前 evidence/report 回答追问或提示增量研究。
+- `agent/middleware.rs`：CitationGuard、JsonSchemaGuard、TokenBudgetTracker。
 
-1. Build a `SearchQuery` from CLI/config.
-2. Optionally generate a bounded DeepSeek SearchPlan.
-3. Fetch GitHub and arXiv concurrently, using cache when enabled.
-4. Continue with partial results when one source fails.
-5. Normalize to `SourceItem`.
-6. Deduplicate, rank, classify, and group by topic labels.
-7. Build citations and run quality checks.
-8. If `--llm` is enabled, call DeepSeek with only the structured source context and parse the returned JSON into `LlmSynthesis`.
-9. Write a source-linked Markdown report and session JSON record.
+## 前端实现
 
-LLM support remains optional. `--llm` requires `DEEPSEEK_API_KEY` or `--deepseek-api-key`; without a key the program returns an explicit configuration error. If DeepSeek is called but synthesis fails, the deterministic report is still written with a warning.
+Web 工作台已切换为 Stage 3 Agent 控制台：
 
-## Explicit Non-Goals For This Stage
+- 配置阶段：DeepSeek API Key、GitHub Token、模型和 base URL。
+- Agent 阶段：创建 stateful run。
+- Plan Tree：编辑 ResearchBrief 后的章节计划和双源 query。
+- Run Timeline：展示状态机、事件流和 checkpoint。
+- Evidence Memory：按章节展示证据、原始链接、query lineage 和抓取错误。
+- Coverage Matrix：展示 QueryGap、SourceGap 和建议查询。
+- Citation Audit：展示 URL 白名单、段落引用覆盖率和警告。
+- Report：Markdown 渲染和可选中文翻译。
+- FollowupRouter：基于当前 EvidenceMemory 和报告追问。
 
-- No Web UI.
-- No browser agent.
-- No arbitrary web crawler.
-- No PDF full-text parser.
-- No multi-turn ReAct loop.
-- No README/topics enrichment by default.
-- No JSON/HTML/PDF export yet.
-- No TUI yet.
+## 安全边界
+
+- LLM 不允许自行联网。
+- LLM 不允许引用 CitationLedger / EvidenceMemory 之外的 URL。
+- 不保存 `DEEPSEEK_API_KEY`、`GITHUB_TOKEN` 或完整 chain-of-thought。
+- rollback 不修改旧 run；从 checkpoint 创建新 run 分支。
+- Stage 3 不做自由 ReAct、不做任意网页搜索、不做 PDF 全文解析、不接外部 agent runtime。
+
+## 验证
+
+常规检查：
+
+```bash
+cargo fmt
+cargo check
+cargo test
+cd web
+npm run build
+```
+
+Stage 3 mini bench：
+
+```bash
+node scripts/stage3_eval.mjs
+```
+
+结果写入 `eval/results/stage3-mini-bench.json`。该 bench 只验证控制环结构和 fixture 门槛，不替代真实网络调研。

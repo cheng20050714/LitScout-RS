@@ -1,8 +1,16 @@
 use serde::{Deserialize, Serialize};
 
+use crate::agent::followup_router::FollowupRoute;
+use crate::agent::orchestrator::StatefulRunEvent;
 use crate::agent::planner::{AspectOutput, PlanOutput};
-use crate::model::{Citation, QualityReport, SourceItem};
+use crate::checkpoint::Checkpoint;
+use crate::model::{
+    ChapterNode, Citation, CitationAuditReport, CoverageReport, EvidenceMemory, QualityReport,
+    QueryPortfolio, SourceItem,
+};
+use crate::run_policy::RunPolicy;
 use crate::workflow::WorkflowEvent;
+use crate::workflow_state::{ResearchRunRecord, ResearchRunState};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlanRequest {
@@ -66,6 +74,78 @@ pub struct RunResponse {
     pub citations: Vec<Citation>,
     pub ranked_items: Vec<SourceItem>,
     pub quality: QualityReport,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateStatefulRunRequest {
+    pub topic: String,
+    #[serde(default)]
+    pub policy: RunPolicy,
+    #[serde(default)]
+    pub config: FrontendConfig,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StatefulRunResponse {
+    pub run_id: String,
+    pub topic: String,
+    pub state: ResearchRunState,
+    pub run: ResearchRunRecord,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "event", content = "data", rename_all = "snake_case")]
+pub enum StatefulRunStreamEvent {
+    Agent(StatefulRunEvent),
+    RunReady(StatefulRunResponse),
+    RunFailed { error: String },
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EvidenceResponse {
+    pub run_id: String,
+    pub evidence_memory: EvidenceMemory,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CoverageResponse {
+    pub run_id: String,
+    pub coverage_report: CoverageReport,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CitationAuditResponse {
+    pub run_id: String,
+    pub citation_audit: CitationAuditReport,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BranchRunRequest {
+    pub checkpoint_id: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ReviseStatefulPlanRequest {
+    pub chapters: Option<Vec<ChapterNode>>,
+    pub query_portfolio: Option<Vec<QueryPortfolio>>,
+    pub user_feedback: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StatefulFollowupRequest {
+    pub question: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StatefulFollowupResponse {
+    pub run_id: String,
+    pub route: FollowupRoute,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CheckpointListResponse {
+    pub run_id: String,
+    pub checkpoints: Vec<Checkpoint>,
 }
 
 #[derive(Debug, Clone, Serialize)]

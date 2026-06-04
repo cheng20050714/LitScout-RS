@@ -6,6 +6,88 @@ use crate::error::{AppError, Result};
 use crate::llm::deepseek::{
     ChatCompletionsRequest, ChatMessage, DeepSeekClient, DeepSeekConfig, ResponseFormat,
 };
+use crate::model::{ChapterNode, QueryPortfolio, ResearchBrief};
+use crate::run_policy::RunPolicy;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChapterPlanOutput {
+    pub chapters: Vec<ChapterNode>,
+    pub query_portfolio: Vec<QueryPortfolio>,
+    pub warnings: Vec<String>,
+}
+
+pub async fn generate_chapter_plan(
+    brief: &ResearchBrief,
+    policy: &RunPolicy,
+    llm_config: &LlmConfig,
+) -> Result<ChapterPlanOutput> {
+    let plan = generate_chinese_plan(
+        &brief.topic,
+        policy.github_budget,
+        policy.arxiv_budget,
+        llm_config,
+    )
+    .await?;
+    Ok(chapter_plan_from_plan_output(&plan, policy))
+}
+
+pub fn chapter_plan_from_plan_output(plan: &PlanOutput, policy: &RunPolicy) -> ChapterPlanOutput {
+    let aspects = plan
+        .aspects
+        .iter()
+        .take(policy.max_aspects_per_round.max(1))
+        .collect::<Vec<_>>();
+    let mut warnings = plan.warnings.clone();
+    if aspects.is_empty() {
+        warnings.push("搜索计划为空，使用默认章节。".to_string());
+    }
+
+    let fallback_aspect = AspectOutput {
+        name_zh: "默认研究方向".to_string(),
+        rationale_zh: "围绕原始主题进行 GitHub 与 arXiv 检索。".to_string(),
+        github_query: plan.original_topic.clone(),
+        arxiv_query: plan.original_topic.clone(),
+        github_limit: policy.github_budget,
+        arxiv_limit: policy.arxiv_budget,
+    };
+    let effective_aspects = if aspects.is_empty() {
+        vec![&fallback_aspect]
+    } else {
+        aspects
+    };
+
+    let chapters = effective_aspects
+        .iter()
+        .enumerate()
+        .map(|(index, aspect)| ChapterNode {
+            id: format!("ch-{}", index + 1),
+            parent_id: None,
+            title_zh: aspect.name_zh.clone(),
+            research_question: aspect.rationale_zh.clone(),
+            required_evidence_kinds: vec!["github".to_string(), "arxiv".to_string()],
+            evidence_quota: (aspect.github_limit + aspect.arxiv_limit).max(1),
+            sort_order: index + 1,
+        })
+        .collect::<Vec<_>>();
+
+    let query_portfolio = effective_aspects
+        .iter()
+        .enumerate()
+        .map(|(index, aspect)| QueryPortfolio {
+            chapter_id: format!("ch-{}", index + 1),
+            github_queries: vec![aspect.github_query.clone()],
+            arxiv_queries: vec![aspect.arxiv_query.clone()],
+            rationale: aspect.rationale_zh.clone(),
+            budget: (aspect.github_limit + aspect.arxiv_limit).max(1),
+        })
+        .collect();
+
+    ChapterPlanOutput {
+        chapters,
+        query_portfolio,
+        warnings,
+    }
+}
 
 pub async fn generate_chinese_plan(
     topic: &str,

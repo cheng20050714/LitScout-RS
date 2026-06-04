@@ -1,0 +1,32 @@
+[
+  {
+    "id": "rust-agent-framework",
+    "topic_zh": "Rust Agent Framework 的开源项目和论文调研",
+    "expected_chapters": 3,
+    "expected_sources": ["github", "arxiv"]
+  },
+  {
+    "id": "text-to-speech-2025",
+    "topic_zh": "2025 年 TTS 领域最新开源项目和论文",
+    "expected_chapters": 3,
+    "expected_sources": ["github", "arxiv"]
+  },
+  {
+    "id": "llm-evaluation-benchmark",
+    "topic_zh": "LLM Evaluation Benchmark 的方法和工具调研",
+    "expected_chapters": 3,
+    "expected_sources": ["github", "arxiv"]
+  },
+  {
+    "id": "rust-web-framework",
+    "topic_zh": "Rust Web Framework 生态和性能研究",
+    "expected_chapters": 3,
+    "expected_sources": ["github", "arxiv"]
+  },
+  {
+    "id": "attention-mechanism",
+    "topic_zh": "Attention Mechanism 近年改进与开源实现",
+    "expected_chapters": 3,
+    "expected_sources": ["github", "arxiv"]
+  }
+]

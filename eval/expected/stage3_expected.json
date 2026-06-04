@@ -1,0 +1,25 @@
+{
+  "state_path": [
+    "created",
+    "plan_ready",
+    "fetching",
+    "evidence_ready",
+    "synthesis_ready",
+    "completed"
+  ],
+  "minimum": {
+    "topics": 5,
+    "chapters_per_topic": 3,
+    "sources_per_topic": 2,
+    "coverage_score": 0.6,
+    "citation_coverage_ratio": 0.8
+  },
+  "required_artifacts": [
+    "research_brief",
+    "chapter_plan",
+    "query_portfolio",
+    "evidence_memory",
+    "coverage_report",
+    "citation_audit"
+  ]
+}
