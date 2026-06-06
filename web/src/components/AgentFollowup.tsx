@@ -21,7 +21,7 @@ function AgentFollowup({ run, onNotice }: AgentFollowupProps) {
   async function handleAsk() {
     const trimmed = question.trim();
     if (!run) {
-      onNotice("请先创建 Agent Run。");
+      onNotice("请先创建调研任务。");
       return;
     }
     if (!trimmed) {
@@ -40,7 +40,7 @@ function AgentFollowup({ run, onNotice }: AgentFollowupProps) {
       setTurns((current) => [...current, { question: trimmed, answer }]);
       setQuestion("");
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "Agent 追问失败。");
+      onNotice(error instanceof Error ? error.message : "追问失败。");
     } finally {
       setLoading(false);
     }
@@ -50,7 +50,7 @@ function AgentFollowup({ run, onNotice }: AgentFollowupProps) {
     <section className="report-chat">
       <div className="section-header">
         <div>
-          <p className="eyebrow">FollowupRouter</p>
+          <p className="eyebrow">智能追问</p>
           <h2>基于当前证据追问</h2>
         </div>
         <span className="badge">{run?.state ?? "idle"}</span>
@@ -58,7 +58,7 @@ function AgentFollowup({ run, onNotice }: AgentFollowupProps) {
 
       <div className="chat-transcript">
         {turns.length === 0 ? (
-          <p className="muted">报告生成后，可以针对 EvidenceMemory 和报告内容提问。</p>
+          <p className="muted">报告生成后，可以针对现有证据和报告内容提问。</p>
         ) : (
           turns.map((turn, index) => (
             <article className="qa-turn" key={`${turn.question}-${index}`}>

@@ -27,6 +27,13 @@ pub enum TraceEvent {
         token_estimate: usize,
         at: DateTime<Utc>,
     },
+    AgentDecision {
+        actor: String,
+        input_hash: String,
+        output_hash: String,
+        rationale: String,
+        at: DateTime<Utc>,
+    },
     ToolCallStarted {
         tool: String,
         query: String,

@@ -169,7 +169,7 @@ pub fn default_plan(topic: &str, github_limit: usize, arxiv_limit: usize) -> Pla
         }],
         llm_generated: false,
         warnings: vec![
-            "LLM 未启用，使用默认搜索计划；如需中文智能规划，请以 --llm 启动并配置 DEEPSEEK_API_KEY。"
+            "LLM 未启用，使用默认搜索计划；如需中文智能规划，请以 --llm 启动并配置 DeepSeek API key。"
                 .to_string(),
         ],
     }

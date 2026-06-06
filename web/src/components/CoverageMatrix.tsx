@@ -11,7 +11,7 @@ function CoverageMatrix({ run, coverage, memory }: CoverageMatrixProps) {
     return (
       <div className="empty-state">
         <h2>等待运行</h2>
-        <p>CoverageCritic 会在证据构建后输出章节覆盖情况。</p>
+        <p>证据构建后，这里会显示每个章节的覆盖情况。</p>
       </div>
     );
   }
@@ -19,8 +19,8 @@ function CoverageMatrix({ run, coverage, memory }: CoverageMatrixProps) {
   if (!coverage) {
     return (
       <div className="empty-state">
-        <h2>Coverage 尚未生成</h2>
-        <p>批准计划并完成抓取后，这里会显示 QueryGap 和 SourceGap。</p>
+        <h2>覆盖度尚未生成</h2>
+        <p>批准计划并完成抓取后，这里会显示查询不足和来源不足。</p>
       </div>
     );
   }
@@ -29,7 +29,7 @@ function CoverageMatrix({ run, coverage, memory }: CoverageMatrixProps) {
     <div className="plan-stack">
       <div className="section-header">
         <div>
-          <p className="eyebrow">CoverageCritic</p>
+          <p className="eyebrow">覆盖度检查</p>
           <h2>覆盖度 {Math.round(coverage.overall_coverage_score * 100)}%</h2>
         </div>
         <span className="badge">{recommendationLabel(coverage.recommendation)}</span>
@@ -98,15 +98,15 @@ function CoverageMatrix({ run, coverage, memory }: CoverageMatrixProps) {
 }
 
 function gapKindLabel(gap: CoverageGap) {
-  return gap.gap_kind === "query_gap" ? "QueryGap" : "SourceGap";
+  return gap.gap_kind === "query_gap" ? "查询不足" : "来源不足";
 }
 
 function recommendationLabel(value: string) {
   return (
     {
-      no_action: "NoAction",
-      suggest_new_query: "SuggestNewQuery",
-      out_of_scope: "OutOfScope"
+      no_action: "无需处理",
+      suggest_new_query: "建议补充查询",
+      out_of_scope: "超出范围"
     }[value] ?? value
   );
 }

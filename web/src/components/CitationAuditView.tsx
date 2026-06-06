@@ -10,7 +10,7 @@ function CitationAuditView({ run, audit }: CitationAuditViewProps) {
     return (
       <div className="empty-state">
         <h2>等待运行</h2>
-        <p>CitationAuditor 会在报告草稿生成后执行。</p>
+        <p>报告草稿生成后，这里会检查引用覆盖和外部链接。</p>
       </div>
     );
   }
@@ -18,7 +18,7 @@ function CitationAuditView({ run, audit }: CitationAuditViewProps) {
   if (!audit) {
     return (
       <div className="empty-state">
-        <h2>Audit 尚未生成</h2>
+        <h2>引用检查尚未生成</h2>
         <p>报告生成后，这里会展示引用白名单和覆盖度检查。</p>
       </div>
     );
@@ -33,10 +33,10 @@ function CitationAuditView({ run, audit }: CitationAuditViewProps) {
     <div className="plan-stack">
       <div className="section-header">
         <div>
-          <p className="eyebrow">CitationAuditor</p>
+          <p className="eyebrow">引用检查</p>
           <h2>{audit.url_whitelist_passed ? "引用白名单通过" : "引用白名单失败"}</h2>
         </div>
-        <span className="badge">{warningTotal} warnings</span>
+        <span className="badge">{warningTotal} 条提醒</span>
       </div>
 
       <div className="plan-metrics">

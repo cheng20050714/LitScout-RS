@@ -25,7 +25,7 @@ function RunTimeline({ run, events, checkpoints, branching, onBranch }: RunTimel
       <section className="phase-card">
         <div className="section-header">
           <div>
-            <p className="eyebrow">Run Timeline</p>
+            <p className="eyebrow">任务进度</p>
             <h2>{run?.run_id ?? "未创建"}</h2>
           </div>
           <span className="badge">{run ? stateLabel(run.state) : "Idle"}</span>
@@ -53,11 +53,11 @@ function RunTimeline({ run, events, checkpoints, branching, onBranch }: RunTimel
 
       <section className="phase-card">
         <div className="section-header">
-          <h2>Checkpoints</h2>
+          <h2>版本检查点</h2>
           <span className="badge">{checkpoints.length}</span>
         </div>
         {checkpoints.length === 0 ? (
-          <p className="muted">暂无 checkpoint。</p>
+          <p className="muted">暂无检查点。</p>
         ) : (
           <div className="checkpoint-list">
             {checkpoints.map((checkpoint) => (
@@ -72,7 +72,7 @@ function RunTimeline({ run, events, checkpoints, branching, onBranch }: RunTimel
                   disabled={!checkpoint.rollback_allowed || branching}
                   onClick={() => onBranch(checkpoint.checkpoint_id)}
                 >
-                  创建分支
+                  从这里新建分支
                 </button>
               </article>
             ))}
@@ -81,9 +81,9 @@ function RunTimeline({ run, events, checkpoints, branching, onBranch }: RunTimel
       </section>
 
       <section className="event-log">
-        <h3>Stateful 事件流</h3>
+        <h3>事件记录</h3>
         {events.length === 0 ? (
-          <p className="muted">等待 Agent 事件</p>
+          <p className="muted">等待任务事件</p>
         ) : (
           events.slice(-8).map((event, index) => (
             <pre key={`${event.event}-${index}`}>{JSON.stringify(event, null, 2)}</pre>
@@ -97,13 +97,13 @@ function RunTimeline({ run, events, checkpoints, branching, onBranch }: RunTimel
 function stateLabel(state: string) {
   return (
     {
-      created: "Created",
-      plan_ready: "PlanReady",
-      fetching: "Fetching",
-      evidence_ready: "EvidenceReady",
-      synthesis_ready: "SynthesisReady",
-      completed: "Completed",
-      failed: "Failed"
+      created: "未开始",
+      plan_ready: "计划待确认",
+      fetching: "抓取资料中",
+      evidence_ready: "证据已整理",
+      synthesis_ready: "报告已生成",
+      completed: "已完成",
+      failed: "失败"
     }[state] ?? state
   );
 }

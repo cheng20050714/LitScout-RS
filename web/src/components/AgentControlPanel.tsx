@@ -17,7 +17,7 @@ function AgentControlPanel({
   onNotice,
   onActivityChange
 }: AgentControlPanelProps) {
-  const [topic, setTopic] = useState("Rust Agent Framework 的开源项目和论文调研");
+  const [topic, setTopic] = useState("Rust 智能体框架的开源项目和论文调研");
   const [githubBudget, setGithubBudget] = useState(10);
   const [arxivBudget, setArxivBudget] = useState(10);
   const [maxAspects, setMaxAspects] = useState(3);
@@ -32,7 +32,7 @@ function AgentControlPanel({
       return;
     }
     if (!config.deepseek_api_key?.trim() && !hasServerLlm) {
-      onNotice("请先在阶段 1 配置 DeepSeek API Key。");
+      onNotice("请先在配置页填写模型服务 API Key。");
       return;
     }
 
@@ -58,7 +58,7 @@ function AgentControlPanel({
       onActivityChange("plan_ready");
     } catch (error) {
       onActivityChange("error");
-      onNotice(error instanceof Error ? error.message : "Agent Run 创建失败。");
+      onNotice(error instanceof Error ? error.message : "调研任务创建失败。");
     } finally {
       setLoading(false);
     }
@@ -67,7 +67,7 @@ function AgentControlPanel({
   return (
     <div className="chat-stack">
       <label className="field">
-        <span>中文研究问题</span>
+        <span>调研主题</span>
         <textarea value={topic} onChange={(event) => setTopic(event.target.value)} rows={6} />
       </label>
 
@@ -112,7 +112,7 @@ function AgentControlPanel({
             checked={skipPlanCritic}
             onChange={(event) => setSkipPlanCritic(event.target.checked)}
           />
-          跳过 PlanCritic
+          跳过计划质量检查
         </label>
         <label>
           <input
@@ -120,19 +120,19 @@ function AgentControlPanel({
             checked={skipCoverageCritic}
             onChange={(event) => setSkipCoverageCritic(event.target.checked)}
           />
-          跳过 CoverageCritic
+          跳过证据覆盖检查
         </label>
       </div>
 
       {loading && (
         <div className="progress-banner" role="status" aria-live="polite">
           <span className="progress-spinner" />
-          <span>正在生成 ResearchBrief 与 ChapterPlan</span>
+          <span>正在生成调研摘要与章节计划</span>
         </div>
       )}
 
       <button className="primary-action" type="button" onClick={handleCreateRun} disabled={loading}>
-        {loading ? "生成中" : "创建 Agent Run"}
+        {loading ? "生成中" : "创建调研任务"}
       </button>
     </div>
   );

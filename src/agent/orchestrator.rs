@@ -65,52 +65,91 @@ pub async fn create_run(
 
     let scoper_input = format!("topic={topic}; policy={:?}", run.policy);
     let scoper_ctx = agent_context("scoper", scoper_input.clone(), &run.policy, Vec::new());
-    token_budget.before_llm_call(&scoper_ctx)?;
-    trace_llm_started(
-        &trace,
-        "scoper",
-        side_model_name(&llm_config),
-        &scoper_input,
-    )
-    .await?;
     let brief = scoper::generate_research_brief(&topic, &run.policy, &llm_config).await?;
     let brief_json = serde_json::to_string(&brief)?;
     json_guard.after_llm_call(&scoper_ctx, &brief_json)?;
-    token_budget.after_llm_call(&scoper_ctx, &brief_json)?;
-    trace_llm_finished(&trace, "scoper", &scoper_input, &brief_json).await?;
+    trace_agent_decision(
+        &trace,
+        "scoper",
+        &scoper_input,
+        &brief_json,
+        "deterministic ResearchBrief scoping",
+    )
+    .await?;
 
     let planner_input = serde_json::to_string(&brief)?;
     let planner_ctx = agent_context("planner", planner_input.clone(), &run.policy, Vec::new());
-    token_budget.before_llm_call(&planner_ctx)?;
-    trace_llm_started(
-        &trace,
-        "planner",
-        side_model_name(&llm_config),
-        &planner_input,
-    )
-    .await?;
-    let plan = planner::generate_chapter_plan(&brief, &run.policy, &llm_config).await?;
-    let plan_json = serde_json::to_string(&plan)?;
-    json_guard.after_llm_call(&planner_ctx, &plan_json)?;
-    token_budget.after_llm_call(&planner_ctx, &plan_json)?;
-    trace_llm_finished(&trace, "planner", &planner_input, &plan_json).await?;
+    let plan = if llm_config_can_call(&llm_config) {
+        token_budget.before_llm_call(&planner_ctx)?;
+        trace_llm_started(
+            &trace,
+            "planner",
+            side_model_name(&llm_config),
+            &planner_input,
+        )
+        .await?;
+        match planner::generate_chapter_plan(&brief, &run.policy, &llm_config).await {
+            Ok(plan) => {
+                let plan_json = serde_json::to_string(&plan)?;
+                json_guard.after_llm_call(&planner_ctx, &plan_json)?;
+                token_budget.after_llm_call(&planner_ctx, &plan_json)?;
+                trace_llm_finished(&trace, "planner", &planner_input, &plan_json).await?;
+                plan
+            }
+            Err(err) => {
+                let reason = err.to_string();
+                trace
+                    .append(&TraceEvent::QualityWarning {
+                        message: format!("Planner LLM 调用失败，已降级为确定性默认计划：{reason}"),
+                        at: Utc::now(),
+                    })
+                    .await?;
+                let plan = fallback_chapter_plan(&brief.topic, &run.policy, Some(&reason));
+                let plan_json = serde_json::to_string(&plan)?;
+                json_guard.after_llm_call(&planner_ctx, &plan_json)?;
+                trace_agent_decision(
+                    &trace,
+                    "planner_fallback",
+                    &planner_input,
+                    &plan_json,
+                    "planner LLM failed; deterministic default plan",
+                )
+                .await?;
+                plan
+            }
+        }
+    } else {
+        let reason = llm_config
+            .enabled
+            .then_some("LLM 已启用但缺少 API key，已使用确定性默认计划。");
+        let plan = fallback_chapter_plan(&brief.topic, &run.policy, reason);
+        let plan_json = serde_json::to_string(&plan)?;
+        json_guard.after_llm_call(&planner_ctx, &plan_json)?;
+        trace_agent_decision(
+            &trace,
+            "planner",
+            &planner_input,
+            &plan_json,
+            "deterministic default plan",
+        )
+        .await?;
+        plan
+    };
 
     let critic_input = serde_json::to_string(&(&brief, &plan.chapters, &plan.query_portfolio))?;
     let critic_ctx = agent_context("plan_critic", critic_input.clone(), &run.policy, Vec::new());
-    token_budget.before_llm_call(&critic_ctx)?;
-    trace_llm_started(
-        &trace,
-        "plan_critic",
-        side_model_name(&llm_config),
-        &critic_input,
-    )
-    .await?;
     let critique =
         plan_critic::critique_plan(&brief, &plan.chapters, &plan.query_portfolio, &run.policy);
     let critique_json = serde_json::to_string(&critique)?;
     json_guard.after_llm_call(&critic_ctx, &critique_json)?;
-    token_budget.after_llm_call(&critic_ctx, &critique_json)?;
-    trace_llm_finished(&trace, "plan_critic", &critic_input, &critique_json).await?;
+    trace_agent_decision(
+        &trace,
+        "plan_critic",
+        &critic_input,
+        &critique_json,
+        "deterministic plan consistency checks",
+    )
+    .await?;
     let from = run.state.clone();
     if !run.transition_to(ResearchRunState::PlanReady) {
         return Err(invalid_transition(&from, &ResearchRunState::PlanReady));
@@ -125,7 +164,7 @@ pub async fn create_run(
         .chain(critique.suggestions)
         .collect();
     run.warnings.push(format!(
-        "Stage 3 agent planning used {} bounded LLM node call(s).",
+        "Stage 3 agent planning used {} real LLM request attempt(s); deterministic nodes are traced as AgentDecision events.",
         token_budget.calls()
     ));
     trace_transition(&trace, from, ResearchRunState::PlanReady).await?;
@@ -180,7 +219,7 @@ async fn continue_from_plan_ready(
     let (arxiv_papers, arxiv_attempts) = arxiv_result?;
     let query_attempts = github_attempts
         .into_iter()
-        .chain(arxiv_attempts.into_iter())
+        .chain(arxiv_attempts)
         .collect::<Vec<QueryAttempt>>();
     for attempt in &query_attempts {
         trace
@@ -572,6 +611,25 @@ async fn trace_llm_finished(
         .await
 }
 
+async fn trace_agent_decision(
+    trace: &TraceWriter,
+    actor: &str,
+    input: &str,
+    output: &str,
+    rationale: &str,
+) -> Result<()> {
+    let (input_hash, output_hash, _tokens) = decision_hash(input, output);
+    trace
+        .append(&TraceEvent::AgentDecision {
+            actor: actor.to_string(),
+            input_hash,
+            output_hash,
+            rationale: rationale.to_string(),
+            at: Utc::now(),
+        })
+        .await
+}
+
 async fn trace_checkpoint(trace: &TraceWriter, checkpoint: &Checkpoint) -> Result<()> {
     trace
         .append(&TraceEvent::CheckpointCreated {
@@ -615,6 +673,28 @@ async fn trace_planned_tool_calls(trace: &TraceWriter, portfolio: &[QueryPortfol
         }
     }
     Ok(())
+}
+
+fn llm_config_can_call(llm_config: &LlmConfig) -> bool {
+    llm_config.enabled
+        && llm_config
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|key| !key.is_empty())
+}
+
+fn fallback_chapter_plan(
+    topic: &str,
+    policy: &RunPolicy,
+    warning: Option<&str>,
+) -> planner::ChapterPlanOutput {
+    let default_plan = planner::default_plan(topic, policy.github_budget, policy.arxiv_budget);
+    let mut plan = planner::chapter_plan_from_plan_output(&default_plan, policy);
+    if let Some(warning) = warning {
+        plan.warnings.push(warning.to_string());
+    }
+    plan
 }
 
 fn agent_context(
@@ -701,4 +781,76 @@ pub fn decision_hash(input: &str, output: &str) -> (String, String, usize) {
         stable_hash(output),
         token_estimate(input) + token_estimate(output),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::create_run;
+    use crate::config::{AppConfig, LlmConfig};
+    use crate::run_policy::RunPolicy;
+    use crate::workflow_state::ResearchRunState;
+
+    #[tokio::test]
+    async fn create_run_falls_back_without_llm_key_and_traces_rule_nodes() {
+        let root = temp_root("stage3-create-run-fallback");
+        let app_config = AppConfig {
+            github_token: None,
+            output: root.join("reports"),
+            cache_dir: root.join("cache"),
+            session_dir: root.join("sessions"),
+            tags_file: None,
+            use_cache: false,
+            cache_ttl_hours: 24,
+            timeout_secs: 30,
+            enrich: false,
+        };
+        let llm_config = LlmConfig {
+            enabled: true,
+            api_key: None,
+            base_url: Some("https://api.deepseek.com".to_string()),
+            main_model: "deepseek-v4-pro".to_string(),
+            side_model: Some("deepseek-v4-flash".to_string()),
+            max_tokens: 4096,
+            timeout_secs: 30,
+        };
+
+        let run = create_run(
+            "Rust agent framework".to_string(),
+            app_config.clone(),
+            llm_config,
+            RunPolicy::default(),
+        )
+        .await
+        .expect("create_run should degrade to a deterministic plan");
+
+        assert_eq!(run.state, ResearchRunState::PlanReady);
+        assert!(run
+            .plan_warnings
+            .iter()
+            .any(|warning| warning.contains("API key")));
+        assert!(run
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("0 real LLM request attempt")));
+
+        let trace_path = app_config.session_dir.join(&run.run_id).join("trace.jsonl");
+        let trace = std::fs::read_to_string(trace_path).expect("trace should be readable");
+        assert!(trace.contains("\"event\":\"agent_decision\""));
+        assert!(trace.contains("\"actor\":\"scoper\""));
+        assert!(trace.contains("\"actor\":\"plan_critic\""));
+        assert!(!trace.contains("\"event\":\"llm_request_started\""));
+    }
+
+    fn temp_root(name: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "litscout-rs-{name}-{}-{unique}",
+            std::process::id()
+        ))
+    }
 }

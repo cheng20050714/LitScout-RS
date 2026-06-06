@@ -38,8 +38,8 @@ function StatusPanel({
     <div className="status-stack">
       <div className="section-header">
         <div>
-          <p className="eyebrow">Telemetry</p>
-          <h2>运行遥测</h2>
+          <p className="eyebrow">运行状态</p>
+          <h2>任务状态</h2>
         </div>
         <span className="badge">{Math.round(progress)}%</span>
       </div>

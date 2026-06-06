@@ -217,7 +217,7 @@ fn render_items(out: &mut String, items: &[SourceItem], kind: SourceKind) {
                 item.classification_reasons.join("; ")
             ));
         }
-        out.push_str("\n");
+        out.push('\n');
         out.push_str(&format!("{}\n\n", truncate(&item.summary, 700)));
     }
 

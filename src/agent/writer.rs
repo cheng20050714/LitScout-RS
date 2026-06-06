@@ -62,7 +62,7 @@ pub fn render_report_markdown(draft: &ReportDraft, citations: &CitationLedger) -
         for paragraph in &chapter.paragraphs {
             out.push_str(&paragraph.text_zh);
             if !paragraph.cited_evidence_ids.is_empty() {
-                out.push_str(" ");
+                out.push(' ');
                 out.push_str(
                     &paragraph
                         .cited_evidence_ids

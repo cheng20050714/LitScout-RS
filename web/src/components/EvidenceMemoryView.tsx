@@ -10,7 +10,7 @@ function EvidenceMemoryView({ run, memory }: EvidenceMemoryViewProps) {
     return (
       <div className="empty-state">
         <h2>等待运行</h2>
-        <p>Agent Run 创建后，EvidenceMemory 会按章节展示。</p>
+        <p>调研任务创建后，证据库会按章节展示。</p>
       </div>
     );
   }
@@ -18,8 +18,8 @@ function EvidenceMemoryView({ run, memory }: EvidenceMemoryViewProps) {
   if (!memory) {
     return (
       <div className="empty-state">
-        <h2>Evidence 尚未生成</h2>
-        <p>批准计划后，GitHubScout 与 ArxivScout 的结果会汇总到这里。</p>
+        <h2>证据尚未生成</h2>
+        <p>批准计划后，GitHub 与 arXiv 的结果会汇总到这里。</p>
       </div>
     );
   }
@@ -30,10 +30,10 @@ function EvidenceMemoryView({ run, memory }: EvidenceMemoryViewProps) {
     <div className="plan-stack">
       <div className="section-header">
         <div>
-          <p className="eyebrow">EvidenceMemory</p>
+          <p className="eyebrow">证据库</p>
           <h2>{memory.items.length} 条证据</h2>
         </div>
-        <span className="badge">{memory.query_attempts.length} queries</span>
+        <span className="badge">{memory.query_attempts.length} 次查询</span>
       </div>
 
       {failedAttempts.length > 0 && (
@@ -58,7 +58,7 @@ function EvidenceMemoryView({ run, memory }: EvidenceMemoryViewProps) {
               <span className="badge">{items.length}</span>
             </div>
             {items.length === 0 ? (
-              <p className="muted">该章节暂无证据，CoverageCritic 会标记缺口。</p>
+              <p className="muted">该章节暂无证据，覆盖度检查会标记缺口。</p>
             ) : (
               <div className="evidence-grid">
                 {items.map((item) => (
@@ -71,7 +71,7 @@ function EvidenceMemoryView({ run, memory }: EvidenceMemoryViewProps) {
       })}
 
       <section className="phase-card">
-        <h3>Query Attempts</h3>
+        <h3>查询记录</h3>
         <table>
           <thead>
             <tr>

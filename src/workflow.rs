@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::Utc;
@@ -27,6 +27,16 @@ pub struct WorkflowRunResult {
     pub output_path: PathBuf,
     pub session_path: Option<PathBuf>,
     pub report: ScoutReport,
+}
+
+struct ReportBuildInput {
+    query: SearchQuery,
+    plan: SearchPlan,
+    app_config: AppConfig,
+    llm_config: LlmConfig,
+    github_repos: Vec<GitHubRepo>,
+    arxiv_papers: Vec<ArxivPaper>,
+    warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -176,13 +186,15 @@ where
     }
 
     build_and_write_report(
-        query,
-        plan,
-        app_config,
-        llm_config,
-        github_repos,
-        arxiv_papers,
-        warnings,
+        ReportBuildInput {
+            query,
+            plan,
+            app_config,
+            llm_config,
+            github_repos,
+            arxiv_papers,
+            warnings,
+        },
         emit,
     )
     .await
@@ -300,15 +312,18 @@ async fn fetch_arxiv_with_cache(
 }
 
 async fn build_and_write_report(
-    query: SearchQuery,
-    plan: SearchPlan,
-    app_config: AppConfig,
-    llm_config: LlmConfig,
-    github_repos: Vec<GitHubRepo>,
-    arxiv_papers: Vec<ArxivPaper>,
-    mut warnings: Vec<String>,
+    input: ReportBuildInput,
     emit: &mut impl FnMut(WorkflowEvent),
 ) -> Result<WorkflowRunResult> {
+    let ReportBuildInput {
+        query,
+        plan,
+        app_config,
+        llm_config,
+        github_repos,
+        arxiv_papers,
+        mut warnings,
+    } = input;
     ensure_llm_ready(&llm_config)?;
 
     let mut source_items = github_repos
@@ -389,7 +404,7 @@ async fn build_and_write_report(
         output_report: output_path.display().to_string(),
         session_path: session_path.as_ref().map(|path| path.display().to_string()),
     });
-    print_run_summary(&report, &output_path, session_path.as_ref());
+    print_run_summary(&report, &output_path, session_path.as_deref());
     Ok(WorkflowRunResult {
         output_path,
         session_path,
@@ -435,7 +450,7 @@ async fn generate_search_plan(query: &SearchQuery, llm_config: &LlmConfig) -> Re
     client.generate_search_plan(query).await
 }
 
-fn print_run_summary(report: &ScoutReport, output_path: &PathBuf, session_path: Option<&PathBuf>) {
+fn print_run_summary(report: &ScoutReport, output_path: &Path, session_path: Option<&Path>) {
     println!("Query: {}", report.query.topic);
     println!("GitHub repositories: {}", report.github_repos.len());
     println!("arXiv papers: {}", report.arxiv_papers.len());
@@ -456,7 +471,7 @@ mod tests {
 
     use chrono::{DateTime, Utc};
 
-    use super::build_and_write_report;
+    use super::{build_and_write_report, ReportBuildInput};
     use crate::config::{AppConfig, LlmConfig};
     use crate::model::{ArxivPaper, GitHubRepo, SearchQuery};
 
@@ -490,13 +505,15 @@ mod tests {
 
         let mut events = Vec::new();
         let result = build_and_write_report(
-            query,
-            plan,
-            config,
-            llm_config,
-            vec![sample_repo()],
-            vec![sample_paper()],
-            Vec::new(),
+            ReportBuildInput {
+                query,
+                plan,
+                app_config: config,
+                llm_config,
+                github_repos: vec![sample_repo()],
+                arxiv_papers: vec![sample_paper()],
+                warnings: Vec::new(),
+            },
             &mut |event| events.push(event),
         )
         .await
@@ -545,13 +562,15 @@ mod tests {
 
         let mut emit = |_| {};
         let err = build_and_write_report(
-            query,
-            plan,
-            config,
-            llm_config,
-            vec![sample_repo()],
-            vec![sample_paper()],
-            Vec::new(),
+            ReportBuildInput {
+                query,
+                plan,
+                app_config: config,
+                llm_config,
+                github_repos: vec![sample_repo()],
+                arxiv_papers: vec![sample_paper()],
+                warnings: Vec::new(),
+            },
             &mut emit,
         )
         .await

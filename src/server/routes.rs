@@ -274,7 +274,9 @@ async fn stream_stateful_run_events(
                     state: run.state.clone(),
                     run,
                 };
-                let _ = tx.send(StatefulRunStreamEvent::RunReady(response)).await;
+                let _ = tx
+                    .send(StatefulRunStreamEvent::RunReady(Box::new(response)))
+                    .await;
             }
             Err(err) => {
                 let _ = tx
@@ -333,7 +335,9 @@ async fn continue_stateful_run(
                     state: run.state.clone(),
                     run,
                 };
-                let _ = tx.send(StatefulRunStreamEvent::RunReady(response)).await;
+                let _ = tx
+                    .send(StatefulRunStreamEvent::RunReady(Box::new(response)))
+                    .await;
             }
             Err(err) => {
                 let _ = tx
@@ -432,7 +436,7 @@ async fn list_stateful_checkpoints(
             checkpoints.push(snapshot.checkpoint);
         }
     }
-    checkpoints.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+    checkpoints.sort_by_key(|checkpoint| checkpoint.created_at);
     Ok(Json(CheckpointListResponse {
         run_id,
         checkpoints,

@@ -97,7 +97,7 @@ pub struct StatefulRunResponse {
 #[serde(tag = "event", content = "data", rename_all = "snake_case")]
 pub enum StatefulRunStreamEvent {
     Agent(StatefulRunEvent),
-    RunReady(StatefulRunResponse),
+    RunReady(Box<StatefulRunResponse>),
     RunFailed { error: String },
 }
 

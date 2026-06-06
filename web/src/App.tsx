@@ -91,20 +91,20 @@ function App() {
       })
       .join("\n\n");
 
-    return `# Stage 3 Agent Run 预览：${agentRun.topic}
+    return `# 调研任务预览：${agentRun.topic}
 
-## ResearchBrief
+## 调研摘要
 
 - 用户意图：${agentRun.brief?.user_intent ?? "尚未生成"}
 - 时间范围：${agentRun.brief?.time_scope ?? "尚未生成"}
 
-## ChapterPlan
+## 章节计划
 
 ${chapters}
 
 ## 当前状态
 
-状态机处于 \`${agentRun.state}\`。批准计划后将执行 GitHub/arXiv 抓取、EvidenceMemory 构建、CoverageCritic、Writer 和 CitationAuditor。`;
+当前任务处于「${stateLabel(agentRun.state)}」。批准计划后将执行 GitHub/arXiv 抓取、证据库构建、覆盖度检查、报告生成和引用检查。`;
   }, [agentRun, reportMarkdown]);
 
   function handleConfigSaved(nextConfig: FrontendConfig) {
@@ -126,7 +126,7 @@ ${chapters}
     setOutputPath(response.run.output_report ?? null);
     setEvents([]);
     setProgress(45);
-    setProgressLabel("PlanReady：等待用户审查");
+    setProgressLabel("计划待确认：等待审查");
     setActiveView("plan");
     setNotice(null);
     refreshCheckpoints(response.run.run_id);
@@ -138,7 +138,7 @@ ${chapters}
     feedback: string
   ) {
     if (!agentRun) {
-      setNotice("请先创建 Agent Run。");
+      setNotice("请先创建调研任务。");
       return;
     }
     setActivity("revising");
@@ -163,7 +163,7 @@ ${chapters}
 
   async function handleApproveRun() {
     if (!agentRun) {
-      setNotice("请先创建 Agent Run。");
+      setNotice("请先创建调研任务。");
       return;
     }
     setActivity("running");
@@ -171,7 +171,7 @@ ${chapters}
     setReportMarkdown("");
     setOutputPath(null);
     setProgress(52);
-    setProgressLabel("已批准计划，准备执行抓取");
+    setProgressLabel("已批准计划，准备抓取资料");
     setNotice(null);
     setEvents([]);
 
@@ -182,7 +182,7 @@ ${chapters}
       });
       setAgentRun(response.run);
       setProgress(100);
-      setProgressLabel("Completed：报告已生成");
+      setProgressLabel("已完成：报告已生成");
       setActivity("report_ready");
       setOutputPath(response.run.output_report ?? null);
       setReportMarkdown(response.run.report_markdown ?? "");
@@ -190,8 +190,8 @@ ${chapters}
       setActiveView("report");
     } catch (error) {
       setActivity("error");
-      setProgressLabel("Agent Run 失败");
-      setNotice(error instanceof Error ? error.message : "Agent Run 执行失败。");
+      setProgressLabel("调研任务执行失败");
+      setNotice(error instanceof Error ? error.message : "调研任务执行失败。");
       setEvents((current) => [
         ...current,
         {
@@ -236,7 +236,7 @@ ${chapters}
       setOutputPath(null);
       setEvents([]);
       setProgress(45);
-      setProgressLabel("已从 PlanReady checkpoint 创建新分支");
+      setProgressLabel("已从计划检查点创建新分支");
       setActiveView("plan");
       await refreshCheckpoints(response.run.run_id);
     } catch (error) {
@@ -277,7 +277,7 @@ ${chapters}
   }
 
   return (
-    <main className="app-shell">
+    <main className={stage === "config" ? "app-shell config-only" : "app-shell"}>
       <aside className="rail" aria-label="阶段导航">
         <div className="brand-mark">
           <span>LS</span>
@@ -296,7 +296,7 @@ ${chapters}
           onClick={() => setStage("research")}
         >
           <span>02</span>
-          Agent
+          调研
         </button>
       </aside>
 
@@ -304,7 +304,7 @@ ${chapters}
         <div className="brand-row">
           <div>
             <p className="eyebrow">LitScout-RS</p>
-            <h1>有状态研究控制台</h1>
+            <h1>{stage === "config" ? "连接配置" : "文献调研工作台"}</h1>
           </div>
           <span className={`status-dot ${health?.status === "ok" ? "ok" : ""}`} />
         </div>
@@ -326,122 +326,125 @@ ${chapters}
               setActivity(nextActivity);
               if (nextActivity === "planning") {
                 setProgress(32);
-                setProgressLabel("正在生成 ResearchBrief 与 ChapterPlan");
+                setProgressLabel("正在生成调研摘要与章节计划");
               }
             }}
           />
         )}
-      </section>
-
-      <section className="pane workspace-pane" aria-label="Agent 工作区">
-        <div className="tabbar agent-tabs" role="tablist">
-          {[
-            ["plan", "计划"],
-            ["evidence", "证据"],
-            ["coverage", "覆盖"],
-            ["audit", "审计"],
-            ["report", "报告"],
-            ["chat", "追问"]
-          ].map(([id, label]) => (
-            <button
-              key={id}
-              role="tab"
-              aria-selected={activeView === id}
-              className={activeView === id ? "active" : ""}
-              type="button"
-              onClick={() => setActiveView(id as ActiveView)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {activeView === "plan" ? (
-          <PlanTree
-            run={agentRun}
-            running={activity === "running"}
-            onRevise={handleRevisePlan}
-            onApprove={handleApproveRun}
-          />
-        ) : activeView === "evidence" ? (
-          <EvidenceMemoryView run={agentRun} memory={evidenceMemory} />
-        ) : activeView === "coverage" ? (
-          <CoverageMatrix run={agentRun} coverage={coverageReport} memory={evidenceMemory} />
-        ) : activeView === "audit" ? (
-          <CitationAuditView run={agentRun} audit={citationAudit} />
-        ) : activeView === "report" ? (
-          <ReportView
-            markdown={reportPreview}
-            canTranslate={Boolean(reportMarkdown)}
-            translating={translating}
-            onTranslate={handleTranslateReport}
-          />
-        ) : (
-          <AgentFollowup run={agentRun} onNotice={setNotice} />
+        {notice && (
+          <div className="notice-box error-tone" role="alert">
+            {notice}
+          </div>
         )}
       </section>
 
-      <section className="pane status-pane" aria-label="运行状态和 checkpoint">
-        <div className="status-stack">
-          <div className="section-header">
-            <div>
-              <p className="eyebrow">Telemetry</p>
-              <h2>状态遥测</h2>
-            </div>
-            <span className="badge">{Math.round(progress)}%</span>
+      {stage === "research" && (
+        <section className="pane workspace-pane" aria-label="调研工作区">
+          <div className="tabbar agent-tabs" role="tablist">
+            {[
+              ["plan", "计划"],
+              ["evidence", "证据"],
+              ["coverage", "覆盖"],
+              ["audit", "引用"],
+              ["report", "报告"],
+              ["chat", "追问"]
+            ].map(([id, label]) => (
+              <button
+                key={id}
+                role="tab"
+                aria-selected={activeView === id}
+                className={activeView === id ? "active" : ""}
+                type="button"
+                onClick={() => setActiveView(id as ActiveView)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
 
-          <div
-            className="progress-meter"
-            role="progressbar"
-            aria-label={progressLabel}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(progress)}
-          >
-            <div style={{ width: `${Math.min(progress, 100)}%` }} />
-          </div>
-          <p className="progress-label">{progressLabel}</p>
+          <details className="telemetry-drawer">
+            <summary>
+              <div>
+                <p className="eyebrow">运行状态</p>
+                <h2>进度、检查点与事件</h2>
+              </div>
+              <span className="badge">{Math.round(progress)}%</span>
+            </summary>
+            <div className="telemetry-grid">
+              <div className="status-stack telemetry-card">
+                <div
+                  className="progress-meter"
+                  role="progressbar"
+                  aria-label={progressLabel}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(progress)}
+                >
+                  <div style={{ width: `${Math.min(progress, 100)}%` }} />
+                </div>
+                <p className="progress-label">{progressLabel}</p>
 
-          <dl className="status-list">
-            <div>
-              <dt>当前任务</dt>
-              <dd>{readableActivity(activity)}</dd>
-            </div>
-            <div>
-              <dt>服务</dt>
-              <dd>{health?.status ?? "unknown"}</dd>
-            </div>
-            <div>
-              <dt>DeepSeek</dt>
-              <dd>{health?.llm_enabled ? "后端启用" : "前端配置"}</dd>
-            </div>
-            <div>
-              <dt>GitHub Token</dt>
-              <dd>{health?.github_token_configured ? "后端已配置" : "按请求传入"}</dd>
-            </div>
-          </dl>
+                <dl className="status-list">
+                  <div>
+                    <dt>当前任务</dt>
+                    <dd>{readableActivity(activity)}</dd>
+                  </div>
+                  <div>
+                    <dt>本机服务</dt>
+                    <dd>{health?.status ?? "unknown"}</dd>
+                  </div>
+                  <div>
+                    <dt>模型服务</dt>
+                    <dd>{health?.llm_enabled ? "后端已启用" : "使用本页配置"}</dd>
+                  </div>
+                  <div>
+                    <dt>GitHub 访问令牌</dt>
+                    <dd>{health?.github_token_configured ? "后端已配置" : "按请求传入"}</dd>
+                  </div>
+                </dl>
 
-          {outputPath && (
-            <div className="notice-box" role="status" aria-live="polite">
-              报告已写入：{outputPath}
+                {outputPath && (
+                  <div className="notice-box" role="status" aria-live="polite">
+                    报告已写入：{outputPath}
+                  </div>
+                )}
+              </div>
+
+              <RunTimeline
+                run={agentRun}
+                events={events}
+                checkpoints={checkpoints}
+                branching={branching}
+                onBranch={handleBranch}
+              />
             </div>
+          </details>
+
+          {activeView === "plan" ? (
+            <PlanTree
+              run={agentRun}
+              running={activity === "running"}
+              onRevise={handleRevisePlan}
+              onApprove={handleApproveRun}
+            />
+          ) : activeView === "evidence" ? (
+            <EvidenceMemoryView run={agentRun} memory={evidenceMemory} />
+          ) : activeView === "coverage" ? (
+            <CoverageMatrix run={agentRun} coverage={coverageReport} memory={evidenceMemory} />
+          ) : activeView === "audit" ? (
+            <CitationAuditView run={agentRun} audit={citationAudit} />
+          ) : activeView === "report" ? (
+            <ReportView
+              markdown={reportPreview}
+              canTranslate={Boolean(reportMarkdown)}
+              translating={translating}
+              onTranslate={handleTranslateReport}
+            />
+          ) : (
+            <AgentFollowup run={agentRun} onNotice={setNotice} />
           )}
-          {notice && (
-            <div className="notice-box error-tone" role="alert">
-              {notice}
-            </div>
-          )}
-        </div>
-
-        <RunTimeline
-          run={agentRun}
-          events={events}
-          checkpoints={checkpoints}
-          branching={branching}
-          onBranch={handleBranch}
-        />
-      </section>
+        </section>
+      )}
     </main>
   );
 }
@@ -463,23 +466,23 @@ function applyStatefulEvent(
       }
     } else if (agentEvent.event === "evidence_ready") {
       setProgress((current) => Math.max(current, 74));
-      setProgressLabel(`EvidenceMemory 已生成，共 ${agentEvent.data?.total ?? 0} 条`);
+      setProgressLabel(`证据库已生成，共 ${agentEvent.data?.total ?? 0} 条`);
     } else if (agentEvent.event === "coverage_ready") {
       setProgress((current) => Math.max(current, 80));
-      setProgressLabel(`CoverageCritic 完成，缺口 ${agentEvent.data?.gaps ?? 0} 个`);
+      setProgressLabel(`覆盖度检查完成，缺口 ${agentEvent.data?.gaps ?? 0} 个`);
     } else if (agentEvent.event === "citation_audit_ready") {
       setProgress((current) => Math.max(current, 92));
-      setProgressLabel("CitationAuditor 完成");
+      setProgressLabel("引用检查完成");
     } else if (agentEvent.event === "checkpoint_created") {
       setProgress((current) => Math.max(current, 58));
-      setProgressLabel("Checkpoint 已写入");
+      setProgressLabel("检查点已保存");
     }
   }
   if (event.event === "run_ready") {
     const response = event.data as StatefulRunResponse;
     setAgentRun(() => response.run);
     setProgress((current) => Math.max(current, progressForState(response.run.state)));
-    setProgressLabel(`${stateLabel(response.run.state)}：run 已更新`);
+    setProgressLabel(`${stateLabel(response.run.state)}：任务已更新`);
   }
 }
 
@@ -504,7 +507,7 @@ function readableActivity(activity: Activity) {
       planning: "正在生成计划",
       revising: "正在保存修订",
       plan_ready: "计划待批准",
-      running: "正在执行 Agent Run",
+      running: "正在执行调研任务",
       report_ready: "报告已生成",
       error: "出现错误"
     }[activity] ?? activity
@@ -514,13 +517,13 @@ function readableActivity(activity: Activity) {
 function stateLabel(state: string) {
   return (
     {
-      created: "Created",
-      plan_ready: "PlanReady",
-      fetching: "Fetching",
-      evidence_ready: "EvidenceReady",
-      synthesis_ready: "SynthesisReady",
-      completed: "Completed",
-      failed: "Failed"
+      created: "未开始",
+      plan_ready: "计划待确认",
+      fetching: "抓取资料中",
+      evidence_ready: "证据已整理",
+      synthesis_ready: "报告已生成",
+      completed: "已完成",
+      failed: "失败"
     }[state] ?? state
   );
 }

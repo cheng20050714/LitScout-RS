@@ -34,8 +34,8 @@ function PlanTree({ run, running, onRevise, onApprove }: PlanTreeProps) {
   if (!run) {
     return (
       <div className="empty-state">
-        <h2>等待 Agent Run</h2>
-        <p>创建 run 后，这里会显示 ResearchBrief、章节计划和每章查询组合。</p>
+        <h2>等待调研任务</h2>
+        <p>创建任务后，这里会显示调研摘要、章节计划和每章查询组合。</p>
       </div>
     );
   }
@@ -45,7 +45,7 @@ function PlanTree({ run, running, onRevise, onApprove }: PlanTreeProps) {
     <div className="plan-stack">
       <div className="section-header">
         <div>
-          <p className="eyebrow">Stateful Plan</p>
+          <p className="eyebrow">调研计划</p>
           <h2>{run.topic}</h2>
         </div>
         <span className="badge">{stateLabel(run.state)}</span>
@@ -53,7 +53,7 @@ function PlanTree({ run, running, onRevise, onApprove }: PlanTreeProps) {
 
       {brief && (
         <section className="phase-card brief-card">
-          <h3>ResearchBrief</h3>
+          <h3>调研摘要</h3>
           <dl className="brief-grid">
             <div>
               <dt>用户意图</dt>
@@ -125,7 +125,7 @@ function PlanTree({ run, running, onRevise, onApprove }: PlanTreeProps) {
 
                 <div className="limit-grid">
                   <label className="field">
-                    <span>GitHub queries</span>
+                  <span>GitHub 查询词</span>
                     <textarea
                       rows={4}
                       value={portfolio.github_queries.join("\n")}
@@ -138,7 +138,7 @@ function PlanTree({ run, running, onRevise, onApprove }: PlanTreeProps) {
                     />
                   </label>
                   <label className="field">
-                    <span>arXiv queries</span>
+                  <span>arXiv 查询词</span>
                     <textarea
                       rows={4}
                       value={portfolio.arxiv_queries.join("\n")}
@@ -175,7 +175,7 @@ function PlanTree({ run, running, onRevise, onApprove }: PlanTreeProps) {
           value={feedback}
           disabled={!planReady || running}
           onChange={(event) => setFeedback(event.target.value)}
-          placeholder="例如：强化 benchmark 章节，降低泛化搜索词。"
+          placeholder="例如：强化评测基准章节，降低泛化搜索词。"
         />
       </label>
 
@@ -274,13 +274,13 @@ function splitLines(value: string): string[] {
 function stateLabel(state: string) {
   return (
     {
-      created: "Created",
-      plan_ready: "PlanReady",
-      fetching: "Fetching",
-      evidence_ready: "EvidenceReady",
-      synthesis_ready: "SynthesisReady",
-      completed: "Completed",
-      failed: "Failed"
+      created: "未开始",
+      plan_ready: "计划待确认",
+      fetching: "抓取资料中",
+      evidence_ready: "证据已整理",
+      synthesis_ready: "报告已生成",
+      completed: "已完成",
+      failed: "失败"
     }[state] ?? state
   );
 }

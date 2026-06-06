@@ -27,7 +27,7 @@ function ReportView({ markdown, canTranslate, translating, onTranslate }: Report
           disabled={!canTranslate || translating}
           onClick={onTranslate}
         >
-          {translating ? "翻译中" : "用 LLM 翻译为中文"}
+          {translating ? "翻译中" : "用模型翻译为中文"}
         </button>
       </div>
       <article className="markdown-preview">
