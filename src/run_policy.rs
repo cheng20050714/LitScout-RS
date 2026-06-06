@@ -22,7 +22,7 @@ impl Default for RunPolicy {
             github_budget: 10,
             arxiv_budget: 10,
             auto_approve_plan: false,
-            allow_github_enrich: false,
+            allow_github_enrich: true,
             require_citation_audit: true,
             skip_plan_critic: false,
             skip_coverage_critic: false,

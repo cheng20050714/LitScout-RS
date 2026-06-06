@@ -1,5 +1,4 @@
 mod agent;
-mod cache;
 mod checkpoint;
 mod classify;
 mod cli;
@@ -8,23 +7,21 @@ mod dedup;
 mod error;
 mod llm;
 mod model;
-mod quality;
 mod ranking;
-mod report;
 mod run_policy;
 mod server;
-mod session;
 mod sources;
 mod trace;
-mod workflow;
 mod workflow_state;
 
 use clap::Parser;
 use tracing::warn;
 
+use crate::agent::orchestrator;
 use crate::cli::Cli;
 use crate::config::{AppConfig, LlmConfig};
 use crate::error::AppError;
+use crate::run_policy::RunPolicy;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -56,8 +53,25 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let output_path = workflow::run(cli.into_query()?, app_config, llm_config).await?;
-    println!("Report written to {}", output_path.display());
+    let query = cli.into_query()?;
+    let run = orchestrator::create_run(
+        query.topic,
+        app_config.clone(),
+        llm_config.clone(),
+        RunPolicy {
+            github_budget: query.github_limit,
+            arxiv_budget: query.arxiv_limit,
+            allow_github_enrich: true,
+            ..RunPolicy::default()
+        },
+    )
+    .await?;
+    let run = orchestrator::continue_run(&run.run_id, app_config, llm_config, None).await?;
+    if let Some(output_path) = run.output_report {
+        println!("Report written to {output_path}");
+    } else {
+        println!("Report generated for run {}", run.run_id);
+    }
 
     Ok(())
 }

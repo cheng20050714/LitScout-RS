@@ -9,42 +9,6 @@ pub struct SearchQuery {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SearchPlan {
-    pub original_topic: String,
-    pub aspects: Vec<SearchAspect>,
-    pub llm_generated: bool,
-}
-
-impl SearchPlan {
-    pub fn from_query(query: &SearchQuery) -> Self {
-        Self {
-            original_topic: query.topic.clone(),
-            aspects: vec![SearchAspect {
-                name: "default".to_string(),
-                github_query: query.topic.clone(),
-                arxiv_query: query.topic.clone(),
-                github_limit: query.github_limit,
-                arxiv_limit: query.arxiv_limit,
-                rationale: None,
-            }],
-            llm_generated: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SearchAspect {
-    pub name: String,
-    pub github_query: String,
-    pub arxiv_query: String,
-    #[serde(default)]
-    pub github_limit: usize,
-    #[serde(default)]
-    pub arxiv_limit: usize,
-    pub rationale: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GitHubRepo {
     pub owner: String,
     pub name: String,
@@ -99,12 +63,13 @@ pub struct SourceItem {
 impl From<&GitHubRepo> for SourceItem {
     fn from(repo: &GitHubRepo) -> Self {
         let summary = repo.description.clone().unwrap_or_default();
+        let evidence_source = repo.readme_excerpt.as_deref().unwrap_or(&summary);
         Self {
             id: format!("github:{}", repo.full_name),
             kind: SourceKind::GitHub,
             title: repo.full_name.clone(),
             url: repo.html_url.clone(),
-            evidence_snippet: excerpt(&summary, 280),
+            evidence_snippet: excerpt(evidence_source, 2000),
             summary,
             tags: repo.topics.clone(),
             score: 0.0,
@@ -239,46 +204,6 @@ pub struct CategoryGroup {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LlmSynthesis {
-    pub executive_summary: String,
-    pub key_findings: Vec<String>,
-    pub recommended_reading_path: Vec<String>,
-    pub limitations: Vec<String>,
-    pub used_citation_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct QualityReport {
-    pub passed: bool,
-    pub warnings: Vec<String>,
-    pub llm_repaired: bool,
-}
-
-impl QualityReport {
-    pub fn pass() -> Self {
-        Self {
-            passed: true,
-            warnings: Vec::new(),
-            llm_repaired: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ScoutReport {
-    pub query: SearchQuery,
-    pub plan: SearchPlan,
-    pub generated_at: DateTime<Utc>,
-    pub github_repos: Vec<GitHubRepo>,
-    pub arxiv_papers: Vec<ArxivPaper>,
-    pub ranked_items: Vec<SourceItem>,
-    pub groups: Vec<CategoryGroup>,
-    pub citations: CitationLedger,
-    pub llm_synthesis: Option<LlmSynthesis>,
-    pub quality: QualityReport,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResearchBrief {
     pub topic: String,
     pub user_intent: String,
@@ -363,10 +288,18 @@ pub struct EvidenceItem {
     pub support_score: Option<f64>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SourceQueryLineage {
+    pub source_item_id: String,
+    pub query_attempt_ids: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct EvidenceMemory {
     pub items: Vec<EvidenceItem>,
     pub query_attempts: Vec<QueryAttempt>,
+    #[serde(default)]
+    pub source_lineage: Vec<SourceQueryLineage>,
 }
 
 impl EvidenceMemory {

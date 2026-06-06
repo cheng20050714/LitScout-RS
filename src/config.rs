@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::cli::Cli;
 use crate::error::{AppError, Result};
 
+pub const DEFAULT_LLM_TIMEOUT_SECS: u64 = 120;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AppConfig {
     pub github_token: Option<String>,
@@ -55,7 +57,7 @@ pub struct LlmConfig {
 impl LlmConfig {
     pub fn from_cli(cli: &Cli) -> Self {
         if !cli.llm {
-            return Self::disabled(cli.timeout);
+            return Self::disabled(llm_timeout_from_cli(cli));
         }
 
         let api_key = cli
@@ -81,10 +83,7 @@ impl LlmConfig {
             .llm_max_tokens
             .or_else(|| read_env_usize(&["DEEPSEEK_MAX_TOKENS", "LLM_MAX_TOKENS"]))
             .unwrap_or(4096);
-        let timeout_secs = cli
-            .llm_timeout
-            .or_else(|| read_env_u64(&["DEEPSEEK_TIMEOUT_SECS", "LLM_TIMEOUT_SECS"]))
-            .unwrap_or(cli.timeout);
+        let timeout_secs = llm_timeout_from_cli(cli);
 
         Self {
             enabled: true,
@@ -149,11 +148,17 @@ fn read_env_u64(keys: &[&str]) -> Option<u64> {
     read_env_first(keys).and_then(|value| value.parse().ok())
 }
 
+fn llm_timeout_from_cli(cli: &Cli) -> u64 {
+    cli.llm_timeout
+        .or_else(|| read_env_u64(&["DEEPSEEK_TIMEOUT_SECS", "LLM_TIMEOUT_SECS"]))
+        .unwrap_or(DEFAULT_LLM_TIMEOUT_SECS)
+}
+
 #[cfg(test)]
 mod tests {
     use clap::Parser;
 
-    use super::{AppConfig, LlmConfig};
+    use super::{AppConfig, LlmConfig, DEFAULT_LLM_TIMEOUT_SECS};
     use crate::cli::Cli;
 
     #[test]
@@ -173,6 +178,17 @@ mod tests {
         assert!(config.api_key.is_none());
         assert_eq!(config.main_model, "deepseek-v4-pro");
         assert_eq!(config.side_model.as_deref(), Some("deepseek-v4-flash"));
+    }
+
+    #[test]
+    fn serve_mode_disabled_llm_config_keeps_llm_timeout_default() {
+        let cli =
+            Cli::try_parse_from(["litscout-rs", "--serve"]).expect("CLI should parse serve mode");
+
+        let config = LlmConfig::from_cli(&cli);
+
+        assert!(!config.enabled);
+        assert_eq!(config.timeout_secs, DEFAULT_LLM_TIMEOUT_SECS);
     }
 
     #[test]

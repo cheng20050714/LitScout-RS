@@ -196,7 +196,7 @@ pub async fn continue_run(
 async fn continue_from_plan_ready(
     run: &mut ResearchRunRecord,
     app_config: AppConfig,
-    _llm_config: LlmConfig,
+    llm_config: LlmConfig,
     tx: Option<mpsc::Sender<StatefulRunEvent>>,
 ) -> Result<ResearchRunRecord> {
     let run_dir = run_dir(&app_config, &run.run_id);
@@ -211,16 +211,22 @@ async fn continue_from_plan_ready(
     .await?;
     trace_planned_tool_calls(&trace, &run.query_portfolio).await?;
 
+    let mut github_config = app_config.clone();
+    github_config.enrich = app_config.enrich || run.policy.allow_github_enrich;
     let (github_result, arxiv_result) = tokio::join!(
-        github_scout::scout_github(&run.query_portfolio, &app_config, 1),
+        github_scout::scout_github(&run.query_portfolio, &github_config, 1),
         arxiv_scout::scout_arxiv(&run.query_portfolio, &app_config, 1)
     );
-    let (github_repos, github_attempts) = github_result?;
-    let (arxiv_papers, arxiv_attempts) = arxiv_result?;
+    let (github_repos, github_attempts, github_lineage) = github_result?;
+    let (arxiv_papers, arxiv_attempts, arxiv_lineage) = arxiv_result?;
     let query_attempts = github_attempts
         .into_iter()
         .chain(arxiv_attempts)
         .collect::<Vec<QueryAttempt>>();
+    let source_lineage = github_lineage
+        .into_iter()
+        .chain(arxiv_lineage)
+        .collect::<Vec<_>>();
     for attempt in &query_attempts {
         trace
             .append(&TraceEvent::ToolCallFinished {
@@ -266,6 +272,7 @@ async fn continue_from_plan_ready(
         github_repos,
         arxiv_papers,
         query_attempts,
+        source_lineage,
     )?;
     let ranked_total = evidence.ranked_items.len();
     let group_total = evidence.groups.len();
@@ -322,7 +329,72 @@ async fn continue_from_plan_ready(
         })
         .await?;
 
-    let draft = writer::draft_report(&run.topic, &run.chapters, &evidence.memory);
+    let writer_input = serde_json::to_string(&(&run.topic, &run.chapters, &evidence.memory))?;
+    let writer_ctx = agent_context("writer", writer_input.clone(), &run.policy, Vec::new());
+    if !llm_config_can_call(&llm_config) {
+        let message = "Writer LLM 需要 DeepSeek API key；拒绝生成模板化最终报告。".to_string();
+        run.warnings.push(message.clone());
+        transition(
+            run,
+            &trace,
+            &app_config,
+            ResearchRunState::Failed,
+            tx.as_ref(),
+        )
+        .await?;
+        let checkpoint = checkpoint::write_checkpoint(&run_dir, run).await?;
+        trace_checkpoint(&trace, &checkpoint).await?;
+        send_checkpoint(tx.as_ref(), &checkpoint).await;
+        if let Some(tx) = tx.as_ref() {
+            let _ = tx
+                .send(StatefulRunEvent::Failed {
+                    error: message.clone(),
+                })
+                .await;
+        }
+        return Err(AppError::InvalidConfig(message));
+    }
+    let writer_model = llm_config.main_model.clone();
+    let writer_budget = TokenBudgetTracker::new();
+    writer_budget.before_llm_call(&writer_ctx)?;
+    trace_llm_started(&trace, "writer", writer_model, &writer_input).await?;
+    let draft_result =
+        writer::draft_report_with_llm(&run.topic, &run.chapters, &evidence.memory, &llm_config)
+            .await;
+    let draft = match draft_result {
+        Ok(draft) => draft,
+        Err(err) => {
+            let message = format!("Writer LLM 写作失败，拒绝生成模板化最终报告：{err}");
+            run.warnings.push(message.clone());
+            trace
+                .append(&TraceEvent::QualityWarning {
+                    message: message.clone(),
+                    at: Utc::now(),
+                })
+                .await?;
+            transition(
+                run,
+                &trace,
+                &app_config,
+                ResearchRunState::Failed,
+                tx.as_ref(),
+            )
+            .await?;
+            let checkpoint = checkpoint::write_checkpoint(&run_dir, run).await?;
+            trace_checkpoint(&trace, &checkpoint).await?;
+            send_checkpoint(tx.as_ref(), &checkpoint).await;
+            if let Some(tx) = tx.as_ref() {
+                let _ = tx
+                    .send(StatefulRunEvent::Failed {
+                        error: message.clone(),
+                    })
+                    .await;
+            }
+            return Err(AppError::Llm(message));
+        }
+    };
+    let draft_json = serde_json::to_string(&draft)?;
+    trace_llm_finished(&trace, "writer", &writer_input, &draft_json).await?;
     let audit = if run.policy.require_citation_audit {
         citation_auditor::audit_citations(&draft, &evidence.citations, &evidence.memory)
     } else {

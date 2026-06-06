@@ -117,44 +117,6 @@ pub async fn generate_chinese_plan(
     parse_plan_json(content, topic, github_limit, arxiv_limit)
 }
 
-pub async fn revise_chinese_plan(
-    current_plan: &PlanOutput,
-    user_feedback: &str,
-    llm_config: &LlmConfig,
-) -> Result<PlanOutput> {
-    if !llm_config.enabled {
-        let mut plan = current_plan.clone();
-        plan.warnings
-            .push("LLM 未启用，无法根据反馈自动改写搜索计划；已保留当前计划。".to_string());
-        return Ok(plan);
-    }
-
-    let config = DeepSeekConfig::from_llm_config(llm_config).ok_or_else(|| {
-        AppError::InvalidConfig(
-            "`--llm` requires a DeepSeek API key. Set DEEPSEEK_API_KEY or pass --deepseek-api-key."
-                .to_string(),
-        )
-    })?;
-    let client = DeepSeekClient::new(config)?;
-    let current_json = serde_json::to_string_pretty(current_plan)?;
-    let github_limit = current_plan.total_github_limit();
-    let arxiv_limit = current_plan.total_arxiv_limit();
-    let request = build_plan_request(
-        client.side_model(),
-        format!(
-            "请根据用户反馈修改搜索计划。\n\n当前计划：\n{current_json}\n\n用户反馈：{user_feedback}\n\n仍然只返回 JSON。"
-        ),
-    );
-    let response = client.chat_completions_with_retry(request).await?;
-    let content = response.first_content()?;
-    parse_plan_json(
-        content,
-        &current_plan.original_topic,
-        github_limit,
-        arxiv_limit,
-    )
-}
-
 pub fn default_plan(topic: &str, github_limit: usize, arxiv_limit: usize) -> PlanOutput {
     PlanOutput {
         plan_id: Uuid::new_v4().to_string(),
@@ -205,7 +167,7 @@ pub(crate) fn parse_plan_json(
 ) -> Result<PlanOutput> {
     let json = crate::llm::deepseek::strip_json_fence(content);
     let llm_response: LlmPlanResponse = serde_json::from_str(json)
-        .map_err(|err| AppError::Llm(format!("SearchPlan JSON 解析失败: {err}")))?;
+        .map_err(|err| AppError::Llm(format!("章节计划 JSON 解析失败: {err}")))?;
 
     let raw_aspects = llm_response
         .aspects
@@ -217,7 +179,7 @@ pub(crate) fn parse_plan_json(
         .collect::<Vec<_>>();
 
     if raw_aspects.is_empty() {
-        return Err(AppError::Llm("SearchPlan 未包含可用搜索方向".to_string()));
+        return Err(AppError::Llm("章节计划未包含可用搜索方向".to_string()));
     }
 
     let github_per_aspect = split_limit(github_limit, raw_aspects.len());
@@ -268,24 +230,6 @@ pub struct PlanOutput {
     pub warnings: Vec<String>,
 }
 
-impl PlanOutput {
-    fn total_github_limit(&self) -> usize {
-        self.aspects
-            .iter()
-            .map(|aspect| aspect.github_limit)
-            .sum::<usize>()
-            .max(1)
-    }
-
-    fn total_arxiv_limit(&self) -> usize {
-        self.aspects
-            .iter()
-            .map(|aspect| aspect.arxiv_limit)
-            .sum::<usize>()
-            .max(1)
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AspectOutput {
     pub name_zh: String,
@@ -334,24 +278,7 @@ const SEARCH_PLAN_SYSTEM_PROMPT: &str = "\
 
 #[cfg(test)]
 mod tests {
-    use super::{default_plan, parse_plan_json, revise_chinese_plan};
-    use crate::config::LlmConfig;
-
-    #[tokio::test]
-    async fn disabled_llm_revision_keeps_current_plan_with_warning() {
-        let current = default_plan("Rust Agent 框架", 10, 10);
-        let llm_config = LlmConfig::from_env(false, 30);
-
-        let revised = revise_chinese_plan(&current, "增加 benchmark 方向", &llm_config)
-            .await
-            .expect("disabled LLM revision should degrade");
-
-        assert_eq!(revised.aspects, current.aspects);
-        assert!(revised
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("LLM 未启用")));
-    }
+    use super::{default_plan, parse_plan_json};
 
     #[test]
     fn default_plan_is_valid_without_llm() {

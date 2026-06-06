@@ -7,14 +7,10 @@ import type {
   CitationAuditResponse,
   CoverageResponse,
   EvidenceResponse,
-  PlanRequest,
-  PlanResponse,
   QueryPortfolio,
   ReportTranslateResponse,
   ReportChatResponse,
   RunPolicy,
-  RunEvent,
-  RunResponse,
   StatefulFollowupResponse,
   StatefulRunResponse,
   StatefulRunStreamEvent
@@ -39,86 +35,6 @@ async function readJson<T>(response: Response): Promise<T> {
 export async function getHealth(): Promise<HealthResponse> {
   const response = await fetch("/api/health");
   return readJson<HealthResponse>(response);
-}
-
-export async function createPlan(request: PlanRequest): Promise<PlanResponse> {
-  const response = await fetch("/api/plan", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request)
-  });
-  return readJson<PlanResponse>(response);
-}
-
-export async function revisePlan(
-  currentPlan: PlanResponse,
-  userFeedback: string,
-  config: FrontendConfig
-): Promise<PlanResponse> {
-  const response = await fetch("/api/plan/revise", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      plan_id: currentPlan.plan_id,
-      current_plan: currentPlan,
-      user_feedback: userFeedback,
-      config
-    })
-  });
-  return readJson<PlanResponse>(response);
-}
-
-export async function runResearch(
-  currentPlan: PlanResponse,
-  config: FrontendConfig
-): Promise<RunResponse> {
-  const response = await fetch("/api/run", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      plan_id: currentPlan.plan_id,
-      current_plan: currentPlan,
-      language: "zh-CN",
-      config
-    })
-  });
-  return readJson<RunResponse>(response);
-}
-
-export async function runResearchStream(
-  currentPlan: PlanResponse,
-  config: FrontendConfig,
-  onEvent: (event: RunEvent) => void
-): Promise<RunResponse> {
-  const response = await fetch("/api/run/stream", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      plan_id: currentPlan.plan_id,
-      current_plan: currentPlan,
-      language: "zh-CN",
-      config
-    })
-  });
-  if (!response.ok || !response.body) {
-    return readJson<RunResponse>(response);
-  }
-  let finalResponse: RunResponse | null = null;
-  await readSse(response, (event) => {
-    const runEvent = event as RunEvent;
-    onEvent(runEvent);
-    if (runEvent.event === "report_ready") {
-      finalResponse = runEvent.data as RunResponse;
-    }
-    if (runEvent.event === "run_failed") {
-      const data = runEvent.data as { error?: string };
-      throw new Error(data.error ?? "调研执行失败。");
-    }
-  });
-  if (!finalResponse) {
-    throw new Error("调研流结束但没有收到报告。");
-  }
-  return finalResponse;
 }
 
 export async function createStatefulRun(
@@ -154,10 +70,13 @@ export async function reviseStatefulPlan(
 
 export async function continueStatefulRunStream(
   runId: string,
+  config: FrontendConfig,
   onEvent: (event: StatefulRunStreamEvent) => void
 ): Promise<StatefulRunResponse> {
   const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/approve-plan`, {
-    method: "POST"
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ config })
   });
   if (!response.ok || !response.body) {
     return readJson<StatefulRunResponse>(response);

@@ -73,12 +73,8 @@ function App() {
   }, []);
 
   const reportPreview = useMemo(() => {
-    if (reportMarkdown) {
-      return reportMarkdown;
-    }
-    if (!agentRun) {
-      return "";
-    }
+    if (reportMarkdown) return reportMarkdown;
+    if (!agentRun) return "";
     const chapters = agentRun.chapters
       .map((chapter, index) => {
         const portfolio = agentRun.query_portfolio.find(
@@ -86,8 +82,8 @@ function App() {
         );
         return `${index + 1}. ${chapter.title_zh}
    - 问题：${chapter.research_question}
-   - GitHub：${(portfolio?.github_queries ?? []).map((query) => `\`${query}\``).join(" / ")}
-   - arXiv：${(portfolio?.arxiv_queries ?? []).map((query) => `\`${query}\``).join(" / ")}`;
+   - GitHub：${(portfolio?.github_queries ?? []).map((q) => `\`${q}\``).join(" / ") || "—"}
+   - arXiv：${(portfolio?.arxiv_queries ?? []).map((q) => `\`${q}\``).join(" / ") || "—"}`;
       })
       .join("\n\n");
 
@@ -104,16 +100,16 @@ ${chapters}
 
 ## 当前状态
 
-当前任务处于「${stateLabel(agentRun.state)}」。批准计划后将执行 GitHub/arXiv 抓取、证据库构建、覆盖度检查、报告生成和引用检查。`;
+当前任务处于「${stateLabel(agentRun.state)}」。批准计划后将启动 GitHub/arXiv 抓取与报告生成。`;
   }, [agentRun, reportMarkdown]);
 
   function handleConfigSaved(nextConfig: FrontendConfig) {
     setConfig(nextConfig);
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(maskEmpty(nextConfig)));
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(compactSessionConfig(nextConfig)));
     setStage("research");
     setActivity("idle");
     setProgress(18);
-    setProgressLabel("配置已保存");
+    setProgressLabel("配置已保存到当前浏览器会话");
     setNotice(null);
   }
 
@@ -126,7 +122,7 @@ ${chapters}
     setOutputPath(response.run.output_report ?? null);
     setEvents([]);
     setProgress(45);
-    setProgressLabel("计划待确认：等待审查");
+    setProgressLabel("计划待确认 — 请审查章节计划");
     setActiveView("plan");
     setNotice(null);
     refreshCheckpoints(response.run.run_id);
@@ -137,19 +133,11 @@ ${chapters}
     queryPortfolio: QueryPortfolio[],
     feedback: string
   ) {
-    if (!agentRun) {
-      setNotice("请先创建调研任务。");
-      return;
-    }
+    if (!agentRun) { setNotice("请先创建调研任务。"); return; }
     setActivity("revising");
     setNotice(null);
     try {
-      const response = await reviseStatefulPlan(
-        agentRun.run_id,
-        chapters,
-        queryPortfolio,
-        feedback
-      );
+      const response = await reviseStatefulPlan(agentRun.run_id, chapters, queryPortfolio, feedback);
       setAgentRun(response.run);
       setProgress(48);
       setProgressLabel("计划修订已保存");
@@ -162,27 +150,24 @@ ${chapters}
   }
 
   async function handleApproveRun() {
-    if (!agentRun) {
-      setNotice("请先创建调研任务。");
-      return;
-    }
+    if (!agentRun) { setNotice("请先创建调研任务。"); return; }
     setActivity("running");
     setActiveView("report");
     setReportMarkdown("");
     setOutputPath(null);
     setProgress(52);
-    setProgressLabel("已批准计划，准备抓取资料");
+    setProgressLabel("已批准 — 正在抓取文献资料");
     setNotice(null);
     setEvents([]);
 
     try {
-      const response = await continueStatefulRunStream(agentRun.run_id, (event) => {
+      const response = await continueStatefulRunStream(agentRun.run_id, config, (event) => {
         setEvents((current) => [...current, event]);
         applyStatefulEvent(event, setProgress, setProgressLabel, setAgentRun);
       });
       setAgentRun(response.run);
       setProgress(100);
-      setProgressLabel("已完成：报告已生成");
+      setProgressLabel("报告已生成");
       setActivity("report_ready");
       setOutputPath(response.run.output_report ?? null);
       setReportMarkdown(response.run.report_markdown ?? "");
@@ -194,19 +179,13 @@ ${chapters}
       setNotice(error instanceof Error ? error.message : "调研任务执行失败。");
       setEvents((current) => [
         ...current,
-        {
-          event: "run_failed",
-          data: { error: error instanceof Error ? error.message : "unknown error" }
-        }
+        { event: "run_failed", data: { error: error instanceof Error ? error.message : "unknown error" } }
       ]);
     }
   }
 
   async function handleTranslateReport() {
-    if (!reportMarkdown) {
-      setNotice("报告生成后才能翻译。");
-      return;
-    }
+    if (!reportMarkdown) { setNotice("报告生成后才能翻译。"); return; }
     setTranslating(true);
     setNotice(null);
     try {
@@ -215,15 +194,11 @@ ${chapters}
       setNotice("报告已翻译为中文，并保留原始引用链接。");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "报告翻译失败。");
-    } finally {
-      setTranslating(false);
-    }
+    } finally { setTranslating(false); }
   }
 
   async function handleBranch(checkpointId: string) {
-    if (!agentRun) {
-      return;
-    }
+    if (!agentRun) return;
     setBranching(true);
     setNotice(null);
     try {
@@ -236,14 +211,12 @@ ${chapters}
       setOutputPath(null);
       setEvents([]);
       setProgress(45);
-      setProgressLabel("已从计划检查点创建新分支");
+      setProgressLabel("已从检查点创建新分支");
       setActiveView("plan");
       await refreshCheckpoints(response.run.run_id);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "创建分支失败。");
-    } finally {
-      setBranching(false);
-    }
+    } finally { setBranching(false); }
   }
 
   async function refreshArtifacts(runId: string) {
@@ -253,35 +226,24 @@ ${chapters}
       getStatefulCitationAudit(runId),
       getStatefulCheckpoints(runId)
     ]);
-    if (evidence.status === "fulfilled") {
-      setEvidenceMemory(evidence.value.evidence_memory);
-    }
-    if (coverage.status === "fulfilled") {
-      setCoverageReport(coverage.value.coverage_report);
-    }
-    if (audit.status === "fulfilled") {
-      setCitationAudit(audit.value.citation_audit);
-    }
-    if (checkpointList.status === "fulfilled") {
-      setCheckpoints(checkpointList.value.checkpoints);
-    }
+    if (evidence.status === "fulfilled") setEvidenceMemory(evidence.value.evidence_memory);
+    if (coverage.status === "fulfilled") setCoverageReport(coverage.value.coverage_report);
+    if (audit.status === "fulfilled") setCitationAudit(audit.value.citation_audit);
+    if (checkpointList.status === "fulfilled") setCheckpoints(checkpointList.value.checkpoints);
   }
 
   async function refreshCheckpoints(runId: string) {
     try {
       const response = await getStatefulCheckpoints(runId);
       setCheckpoints(response.checkpoints);
-    } catch {
-      setCheckpoints([]);
-    }
+    } catch { setCheckpoints([]); }
   }
 
   return (
     <main className={stage === "config" ? "app-shell config-only" : "app-shell"}>
+      {/* Rail navigation */}
       <aside className="rail" aria-label="阶段导航">
-        <div className="brand-mark">
-          <span>LS</span>
-        </div>
+        <div className="brand-mark">LS</div>
         <button
           className={stage === "config" ? "rail-step active" : "rail-step"}
           type="button"
@@ -300,22 +262,18 @@ ${chapters}
         </button>
       </aside>
 
+      {/* Left pane: config or agent control */}
       <section className="pane command-pane" aria-label="配置和输入">
         <div className="brand-row">
           <div>
             <p className="eyebrow">LitScout-RS</p>
-            <h1>{stage === "config" ? "连接配置" : "文献调研工作台"}</h1>
+            <h1>{stage === "config" ? "连接配置" : "文献调研"}</h1>
           </div>
           <span className={`status-dot ${health?.status === "ok" ? "ok" : ""}`} />
         </div>
 
         {stage === "config" ? (
-          <ConfigPanel
-            config={config}
-            health={health}
-            onSave={handleConfigSaved}
-            onNotice={setNotice}
-          />
+          <ConfigPanel config={config} health={health} onSave={handleConfigSaved} onNotice={setNotice} />
         ) : (
           <AgentControlPanel
             config={config}
@@ -331,37 +289,41 @@ ${chapters}
             }}
           />
         )}
+
         {notice && (
-          <div className="notice-box error-tone" role="alert">
+          <div className="notice-box error-tone" role="alert" style={{ marginTop: 16 }}>
             {notice}
           </div>
         )}
       </section>
 
+      {/* Right pane: workspace */}
       {stage === "research" && (
         <section className="pane workspace-pane" aria-label="调研工作区">
+          {/* Tabs */}
           <div className="tabbar agent-tabs" role="tablist">
-            {[
+            {([
               ["plan", "计划"],
               ["evidence", "证据"],
               ["coverage", "覆盖"],
               ["audit", "引用"],
               ["report", "报告"],
               ["chat", "追问"]
-            ].map(([id, label]) => (
+            ] as const).map(([id, label]) => (
               <button
                 key={id}
                 role="tab"
                 aria-selected={activeView === id}
                 className={activeView === id ? "active" : ""}
                 type="button"
-                onClick={() => setActiveView(id as ActiveView)}
+                onClick={() => setActiveView(id)}
               >
                 {label}
               </button>
             ))}
           </div>
 
+          {/* Telemetry drawer */}
           <details className="telemetry-drawer">
             <summary>
               <div>
@@ -371,6 +333,7 @@ ${chapters}
               <span className="badge">{Math.round(progress)}%</span>
             </summary>
             <div className="telemetry-grid">
+              {/* Status card */}
               <div className="status-stack telemetry-card">
                 <div
                   className="progress-meter"
@@ -385,26 +348,14 @@ ${chapters}
                 <p className="progress-label">{progressLabel}</p>
 
                 <dl className="status-list">
-                  <div>
-                    <dt>当前任务</dt>
-                    <dd>{readableActivity(activity)}</dd>
-                  </div>
-                  <div>
-                    <dt>本机服务</dt>
-                    <dd>{health?.status ?? "unknown"}</dd>
-                  </div>
-                  <div>
-                    <dt>模型服务</dt>
-                    <dd>{health?.llm_enabled ? "后端已启用" : "使用本页配置"}</dd>
-                  </div>
-                  <div>
-                    <dt>GitHub 访问令牌</dt>
-                    <dd>{health?.github_token_configured ? "后端已配置" : "按请求传入"}</dd>
-                  </div>
+                  <div><dt>当前任务</dt><dd>{readableActivity(activity)}</dd></div>
+                  <div><dt>本机服务</dt><dd>{health?.status === "ok" ? "运行中" : "未知"}</dd></div>
+                  <div><dt>模型服务</dt><dd>{health?.llm_enabled ? "后端已启用" : "本页配置"}</dd></div>
+                  <div><dt>GitHub 令牌</dt><dd>{health?.github_token_configured ? "后端已配置" : "按请求传入"}</dd></div>
                 </dl>
 
                 {outputPath && (
-                  <div className="notice-box" role="status" aria-live="polite">
+                  <div className="notice-box" role="status" aria-live="polite" style={{ marginTop: 8 }}>
                     报告已写入：{outputPath}
                   </div>
                 )}
@@ -420,13 +371,9 @@ ${chapters}
             </div>
           </details>
 
+          {/* Active view */}
           {activeView === "plan" ? (
-            <PlanTree
-              run={agentRun}
-              running={activity === "running"}
-              onRevise={handleRevisePlan}
-              onApprove={handleApproveRun}
-            />
+            <PlanTree run={agentRun} running={activity === "running"} onRevise={handleRevisePlan} onApprove={handleApproveRun} />
           ) : activeView === "evidence" ? (
             <EvidenceMemoryView run={agentRun} memory={evidenceMemory} />
           ) : activeView === "coverage" ? (
@@ -434,12 +381,7 @@ ${chapters}
           ) : activeView === "audit" ? (
             <CitationAuditView run={agentRun} audit={citationAudit} />
           ) : activeView === "report" ? (
-            <ReportView
-              markdown={reportPreview}
-              canTranslate={Boolean(reportMarkdown)}
-              translating={translating}
-              onTranslate={handleTranslateReport}
-            />
+            <ReportView markdown={reportPreview} canTranslate={Boolean(reportMarkdown)} translating={translating} onTranslate={handleTranslateReport} />
           ) : (
             <AgentFollowup run={agentRun} onNotice={setNotice} />
           )}
@@ -449,6 +391,8 @@ ${chapters}
   );
 }
 
+/* ── helpers ── */
+
 function applyStatefulEvent(
   event: StatefulRunStreamEvent,
   setProgress: (updater: (current: number) => number) => void,
@@ -456,107 +400,66 @@ function applyStatefulEvent(
   setAgentRun: (updater: (current: ResearchRunRecord | null) => ResearchRunRecord | null) => void
 ) {
   if (event.event === "agent") {
-    const agentEvent = event.data as { event: string; data?: Record<string, unknown> };
-    if (agentEvent.event === "state_changed") {
-      const state = agentEvent.data?.state as ResearchRunRecord["state"] | undefined;
+    const ae = event.data as { event: string; data?: Record<string, unknown> };
+    if (ae.event === "state_changed") {
+      const state = ae.data?.state as ResearchRunRecord["state"] | undefined;
       if (state) {
-        setAgentRun((current) => (current ? { ...current, state } : current));
-        setProgress((current) => Math.max(current, progressForState(state)));
+        setAgentRun((c) => (c ? { ...c, state } : c));
+        setProgress((c) => Math.max(c, progressForState(state)));
         setProgressLabel(`${stateLabel(state)}：状态已推进`);
       }
-    } else if (agentEvent.event === "evidence_ready") {
-      setProgress((current) => Math.max(current, 74));
-      setProgressLabel(`证据库已生成，共 ${agentEvent.data?.total ?? 0} 条`);
-    } else if (agentEvent.event === "coverage_ready") {
-      setProgress((current) => Math.max(current, 80));
-      setProgressLabel(`覆盖度检查完成，缺口 ${agentEvent.data?.gaps ?? 0} 个`);
-    } else if (agentEvent.event === "citation_audit_ready") {
-      setProgress((current) => Math.max(current, 92));
+    } else if (ae.event === "evidence_ready") {
+      setProgress((c) => Math.max(c, 74));
+      setProgressLabel(`证据库已生成，共 ${ae.data?.total ?? 0} 条`);
+    } else if (ae.event === "coverage_ready") {
+      setProgress((c) => Math.max(c, 80));
+      setProgressLabel(`覆盖度检查完成，缺口 ${ae.data?.gaps ?? 0} 个`);
+    } else if (ae.event === "citation_audit_ready") {
+      setProgress((c) => Math.max(c, 92));
       setProgressLabel("引用检查完成");
-    } else if (agentEvent.event === "checkpoint_created") {
-      setProgress((current) => Math.max(current, 58));
+    } else if (ae.event === "checkpoint_created") {
+      setProgress((c) => Math.max(c, 58));
       setProgressLabel("检查点已保存");
     }
   }
   if (event.event === "run_ready") {
-    const response = event.data as StatefulRunResponse;
-    setAgentRun(() => response.run);
-    setProgress((current) => Math.max(current, progressForState(response.run.state)));
-    setProgressLabel(`${stateLabel(response.run.state)}：任务已更新`);
+    const r = event.data as StatefulRunResponse;
+    setAgentRun(() => r.run);
+    setProgress((c) => Math.max(c, progressForState(r.run.state)));
+    setProgressLabel(`${stateLabel(r.run.state)}：任务已更新`);
   }
 }
 
 function progressForState(state: ResearchRunRecord["state"]) {
   return (
-    {
-      created: 24,
-      plan_ready: 45,
-      fetching: 62,
-      evidence_ready: 78,
-      synthesis_ready: 92,
-      completed: 100,
-      failed: 100
-    }[state] ?? 0
+    { created: 24, plan_ready: 45, fetching: 62, evidence_ready: 78, synthesis_ready: 92, completed: 100, failed: 100 }[state] ?? 0
   );
 }
 
 function readableActivity(activity: Activity) {
   return (
-    {
-      idle: "空闲",
-      planning: "正在生成计划",
-      revising: "正在保存修订",
-      plan_ready: "计划待批准",
-      running: "正在执行调研任务",
-      report_ready: "报告已生成",
-      error: "出现错误"
-    }[activity] ?? activity
+    { idle: "空闲", planning: "正在生成计划", revising: "正在保存修订", plan_ready: "计划待批准", running: "正在执行调研任务", report_ready: "报告已生成", error: "出现错误" }[activity] ?? activity
   );
 }
 
 function stateLabel(state: string) {
   return (
-    {
-      created: "未开始",
-      plan_ready: "计划待确认",
-      fetching: "抓取资料中",
-      evidence_ready: "证据已整理",
-      synthesis_ready: "报告已生成",
-      completed: "已完成",
-      failed: "失败"
-    }[state] ?? state
+    { created: "未开始", plan_ready: "计划待确认", fetching: "抓取资料中", evidence_ready: "证据已整理", synthesis_ready: "报告已生成", completed: "已完成", failed: "失败" }[state] ?? state
   );
 }
 
 function loadConfig(): FrontendConfig {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return {
-        deepseek_base_url: "https://api.deepseek.com",
-        deepseek_model: "deepseek-v4-pro",
-        deepseek_side_model: "deepseek-v4-flash"
-      };
-    }
-    return {
-      deepseek_base_url: "https://api.deepseek.com",
-      deepseek_model: "deepseek-v4-pro",
-      deepseek_side_model: "deepseek-v4-flash",
-      ...JSON.parse(raw)
-    };
+    if (!raw) return { deepseek_base_url: "https://api.deepseek.com", deepseek_model: "deepseek-v4-pro", deepseek_side_model: "deepseek-v4-flash" };
+    return { deepseek_base_url: "https://api.deepseek.com", deepseek_model: "deepseek-v4-pro", deepseek_side_model: "deepseek-v4-flash", ...JSON.parse(raw) };
   } catch {
-    return {
-      deepseek_base_url: "https://api.deepseek.com",
-      deepseek_model: "deepseek-v4-pro",
-      deepseek_side_model: "deepseek-v4-flash"
-    };
+    return { deepseek_base_url: "https://api.deepseek.com", deepseek_model: "deepseek-v4-pro", deepseek_side_model: "deepseek-v4-flash" };
   }
 }
 
-function maskEmpty(config: FrontendConfig): FrontendConfig {
-  return Object.fromEntries(
-    Object.entries(config).filter(([, value]) => typeof value === "string" && value.trim())
-  ) as FrontendConfig;
+function compactSessionConfig(config: FrontendConfig): FrontendConfig {
+  return Object.fromEntries(Object.entries(config).filter(([, v]) => typeof v === "string" && v.trim())) as FrontendConfig;
 }
 
 export default App;
