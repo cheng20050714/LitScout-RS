@@ -572,6 +572,12 @@ textarea:focus, input:focus, button:focus-visible, summary:focus-visible {
   color: var(--danger);
 }
 
+.notice-box.warning-tone {
+  border-color: rgba(176, 106, 40, 0.2);
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
 /* ===== Progress ===== */
 
 .progress-banner, .progress-strip {
@@ -653,6 +659,14 @@ textarea:focus, input:focus, button:focus-visible, summary:focus-visible {
 
 .telemetry-drawer summary .eyebrow { margin-bottom: 2px; }
 .telemetry-drawer summary h2 { font-size: 15px; }
+
+.telemetry-summary-hint {
+  margin: 6px 0 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+}
 
 .telemetry-grid {
   display: grid;
@@ -834,6 +848,7 @@ textarea:focus, input:focus, button:focus-visible, summary:focus-visible {
 }
 
 .evidence-card, .gap-card {
+  position: relative;
   min-width: 0;
   padding: 14px 16px;
   border: 1px solid var(--line);
@@ -848,6 +863,52 @@ textarea:focus, input:focus, button:focus-visible, summary:focus-visible {
 }
 
 .evidence-card h3 { margin-top: 8px; line-height: 1.35; }
+
+.evidence-card-top {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.evidence-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.evidence-add-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  flex: 0 0 32px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--accent);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.evidence-add-button:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  transform: translateY(-1px);
+}
+
+.evidence-add-button.added {
+  color: var(--success);
+  background: var(--success-soft);
+}
+
+.evidence-add-button:disabled {
+  cursor: default;
+  opacity: 0.8;
+  transform: none;
+}
 
 .lineage-list {
   display: flex;
@@ -1038,6 +1099,134 @@ th {
   color: var(--ink);
   font-family: var(--font-mono);
   font-size: 0.88em;
+}
+
+/* ===== Report workspace ===== */
+
+.report-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.8fr);
+  gap: 16px;
+  align-items: start;
+}
+
+/* ===== Reading library ===== */
+
+.reading-library-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.library-list {
+  position: sticky;
+  top: 24px;
+  max-height: calc(100vh - 56px);
+  overflow: auto;
+}
+
+.library-paper-list {
+  display: grid;
+  gap: 8px;
+}
+
+.library-paper {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  width: 100%;
+  min-height: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--ink);
+  text-align: left;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.library-paper:hover {
+  border-color: var(--line-strong);
+  background: var(--panel-hover);
+}
+
+.library-paper.active {
+  border-color: rgba(42, 75, 204, 0.35);
+  background: var(--accent-soft);
+}
+
+.library-paper span {
+  width: 100%;
+  color: var(--ink-strong);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.library-paper small {
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.library-reader {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.reader-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.danger-action {
+  color: var(--danger);
+}
+
+.text-meta-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.text-meta-panel span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-muted);
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 5px 8px;
+}
+
+.library-content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.library-note {
+  min-height: 420px;
+}
+
+.inline-empty {
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  padding: 24px;
+}
+
+.paper-chat {
+  position: sticky;
+  top: 24px;
+  max-height: calc(100vh - 56px);
+  overflow: auto;
 }
 
 .markdown-preview pre code, .markdown-answer pre code {

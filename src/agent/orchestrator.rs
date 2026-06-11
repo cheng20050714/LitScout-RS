@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::agent::{
-    arxiv_scout, citation_auditor, coverage_critic, evidence, followup_router, github_scout,
+    arxiv_scout, citation_auditor, coverage_critic, evidence, github_scout,
     middleware::{
         AgentContext, AgentMiddleware, CitationGuard, JsonSchemaGuard, TokenBudgetTracker,
     },
@@ -598,21 +598,6 @@ async fn load_checkpoint_snapshot_by_id(
     Err(AppError::Workflow(format!(
         "checkpoint `{checkpoint_id}` was not found for run `{run_id}`"
     )))
-}
-
-pub fn route_followup_for_run(
-    question: &str,
-    memory: Option<&EvidenceMemory>,
-    report_markdown: Option<&str>,
-) -> followup_router::FollowupRoute {
-    match (memory, report_markdown) {
-        (Some(memory), Some(markdown)) => {
-            followup_router::route_followup(question, memory, markdown)
-        }
-        _ => followup_router::FollowupRoute::IncrementalResearchRequired {
-            reason: "当前 run 尚未完成 evidence/report，无法基于现有证据回答。".to_string(),
-        },
-    }
 }
 
 async fn transition(

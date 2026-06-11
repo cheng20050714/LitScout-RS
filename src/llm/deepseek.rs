@@ -2,9 +2,11 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use futures_util::StreamExt as FuturesStreamExt;
 use regex::Regex;
 use reqwest::header::{ACCEPT, ACCEPT_ENCODING, CONTENT_ENCODING};
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 use tracing::warn;
 
 use crate::config::LlmConfig;
@@ -147,6 +149,50 @@ impl DeepSeekClient {
         }
 
         serde_json::from_str(&body).map_err(AppError::from)
+    }
+
+    pub(crate) async fn chat_completions_stream_text(
+        &self,
+        mut request: ChatCompletionsRequest,
+        delta_tx: Option<mpsc::Sender<String>>,
+    ) -> Result<String> {
+        request.stream = Some(true);
+        let response = self
+            .http
+            .post(self.config.chat_completions_url())
+            .bearer_auth(&self.config.api_key)
+            .header(ACCEPT, "application/json")
+            .header(ACCEPT_ENCODING, "identity")
+            .json(&request)
+            .send()
+            .await?;
+        let status = response.status();
+        let content_encoding = content_encoding_label(response.headers());
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(AppError::HttpStatus {
+                service: "DeepSeek",
+                status: status.as_u16(),
+                body,
+            });
+        }
+
+        let mut stream = response.bytes_stream();
+        let mut buffer: Vec<u8> = Vec::new();
+        let mut answer = String::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|err| {
+                AppError::Llm(format!(
+                    "DeepSeek streaming response read failed (status {}, content-encoding `{}`): {err}",
+                    status.as_u16(),
+                    content_encoding
+                ))
+            })?;
+            buffer.extend_from_slice(&chunk);
+            drain_sse_lines(&mut buffer, &mut answer, delta_tx.as_ref()).await?;
+        }
+        drain_final_sse_line(&mut buffer, &mut answer, delta_tx.as_ref()).await?;
+        Ok(answer)
     }
 
     pub(crate) fn side_model(&self) -> String {
@@ -300,6 +346,94 @@ pub struct ChatCompletionsResponse {
     pub choices: Vec<ChatChoice>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct ChatCompletionsStreamChunk {
+    #[serde(default)]
+    choices: Vec<ChatStreamChoice>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct ChatStreamChoice {
+    #[serde(default)]
+    delta: Option<ChatStreamDelta>,
+    #[serde(default)]
+    finish_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct ChatStreamDelta {
+    #[serde(default)]
+    content: Option<String>,
+}
+
+async fn drain_sse_lines(
+    buffer: &mut Vec<u8>,
+    answer: &mut String,
+    delta_tx: Option<&mpsc::Sender<String>>,
+) -> Result<()> {
+    while let Some(pos) = buffer.iter().position(|byte| *byte == b'\n') {
+        let mut line = buffer.drain(..=pos).collect::<Vec<_>>();
+        while matches!(line.last(), Some(b'\n' | b'\r')) {
+            line.pop();
+        }
+        handle_sse_line(&line, answer, delta_tx).await?;
+    }
+    Ok(())
+}
+
+async fn drain_final_sse_line(
+    buffer: &mut Vec<u8>,
+    answer: &mut String,
+    delta_tx: Option<&mpsc::Sender<String>>,
+) -> Result<()> {
+    if buffer.is_empty() {
+        return Ok(());
+    }
+    let line = std::mem::take(buffer);
+    handle_sse_line(&line, answer, delta_tx).await
+}
+
+async fn handle_sse_line(
+    line: &[u8],
+    answer: &mut String,
+    delta_tx: Option<&mpsc::Sender<String>>,
+) -> Result<()> {
+    if line.is_empty() {
+        return Ok(());
+    }
+    let text = std::str::from_utf8(line)
+        .map_err(|err| AppError::Llm(format!("DeepSeek stream emitted invalid UTF-8: {err}")))?;
+    let Some(payload) = text.trim().strip_prefix("data:") else {
+        return Ok(());
+    };
+    let payload = payload.trim();
+    if payload.is_empty() || payload == "[DONE]" {
+        return Ok(());
+    }
+    let chunk: ChatCompletionsStreamChunk = serde_json::from_str(payload).map_err(|err| {
+        AppError::Llm(format!(
+            "DeepSeek stream emitted invalid JSON chunk: {err}; raw={payload}"
+        ))
+    })?;
+    for choice in chunk.choices {
+        if matches!(choice.finish_reason.as_deref(), Some("length")) {
+            return Err(AppError::Llm(
+                "DeepSeek streaming response was truncated with finish_reason=length".to_string(),
+            ));
+        }
+        if let Some(content) = choice.delta.and_then(|delta| delta.content) {
+            if content.is_empty() {
+                continue;
+            }
+            answer.push_str(&content);
+            if let Some(tx) = delta_tx {
+                let _ = tx.send(content).await;
+            }
+        }
+    }
+    Ok(())
+}
+
 impl ChatCompletionsResponse {
     pub(crate) fn first_content(&self) -> Result<&str> {
         let choice = self
@@ -356,9 +490,9 @@ pub struct ChatResponseMessage {
 #[cfg(test)]
 mod tests {
     use super::{
-        content_encoding_label, extract_urls, validate_translated_markdown, ChatChoice,
-        ChatCompletionsRequest, ChatCompletionsResponse, ChatMessage, ChatResponseMessage,
-        DeepSeekClient, DeepSeekConfig, ResponseFormat,
+        content_encoding_label, drain_sse_lines, extract_urls, validate_translated_markdown,
+        ChatChoice, ChatCompletionsRequest, ChatCompletionsResponse, ChatMessage,
+        ChatResponseMessage, DeepSeekClient, DeepSeekConfig, ResponseFormat,
     };
     use reqwest::header::{HeaderMap, HeaderValue, CONTENT_ENCODING};
 
@@ -435,6 +569,18 @@ mod tests {
             client.config.chat_completions_url(),
             "https://api.deepseek.com/chat/completions"
         );
+    }
+
+    #[tokio::test]
+    async fn parses_streaming_delta_lines() {
+        let mut buffer = b"data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\" world\"}}]}\n".to_vec();
+        let mut answer = String::new();
+
+        drain_sse_lines(&mut buffer, &mut answer, None)
+            .await
+            .expect("stream lines should parse");
+
+        assert_eq!(answer, "hello world");
     }
 
     #[test]

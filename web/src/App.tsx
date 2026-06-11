@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  addReadingLibraryItem,
   branchStatefulRun,
   continueStatefulRunStream,
   getHealth,
+  listReadingLibrary,
   getStatefulCheckpoints,
   getStatefulCitationAudit,
   getStatefulCoverage,
@@ -15,25 +17,29 @@ import type {
   Checkpoint,
   CitationAuditReport,
   CoverageReport,
+  EvidenceItem,
   EvidenceMemory,
   FrontendConfig,
   HealthResponse,
   QueryPortfolio,
+  ReadingLibraryItem,
+  ReadingLibrarySummary,
   ResearchRunRecord,
   StatefulRunResponse,
   StatefulRunStreamEvent
 } from "./api/types";
 import AgentControlPanel from "./components/AgentControlPanel";
-import AgentFollowup from "./components/AgentFollowup";
 import CitationAuditView from "./components/CitationAuditView";
 import ConfigPanel from "./components/ConfigPanel";
 import CoverageMatrix from "./components/CoverageMatrix";
 import EvidenceMemoryView from "./components/EvidenceMemoryView";
 import PlanTree from "./components/PlanTree";
+import ReadingLibraryView from "./components/ReadingLibraryView";
+import ReportChat from "./components/ReportChat";
 import ReportView from "./components/ReportView";
 import RunTimeline from "./components/RunTimeline";
 
-type Stage = "config" | "research";
+type Stage = "config" | "research" | "library";
 type Activity =
   | "idle"
   | "planning"
@@ -42,7 +48,7 @@ type Activity =
   | "running"
   | "report_ready"
   | "error";
-type ActiveView = "plan" | "evidence" | "coverage" | "audit" | "report" | "chat";
+type ActiveView = "plan" | "evidence" | "coverage" | "audit" | "report";
 
 const STORAGE_KEY = "litscout-rs-web-config";
 
@@ -65,11 +71,15 @@ function App() {
   const [outputPath, setOutputPath] = useState<string | null>(null);
   const [translating, setTranslating] = useState(false);
   const [branching, setBranching] = useState(false);
+  const [libraryItems, setLibraryItems] = useState<ReadingLibrarySummary[]>([]);
+  const [activePaperKey, setActivePaperKey] = useState<string | null>(null);
+  const [addingEvidenceId, setAddingEvidenceId] = useState<string | null>(null);
 
   useEffect(() => {
     getHealth()
       .then(setHealth)
       .catch((error: Error) => setNotice(error.message));
+    refreshLibrary();
   }, []);
 
   const reportPreview = useMemo(() => {
@@ -219,6 +229,49 @@ ${chapters}
     } finally { setBranching(false); }
   }
 
+  async function handleAddToLibrary(item: EvidenceItem) {
+    if (!agentRun) { setNotice("请先创建调研任务。"); return; }
+    setAddingEvidenceId(item.evidence_id);
+    setNotice(null);
+    try {
+      const response = await addReadingLibraryItem(agentRun.run_id, item);
+      await refreshLibrary();
+      setActivePaperKey(response.item.paper_key);
+      setNotice("论文已加入阅读库。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "加入阅读库失败。");
+    } finally {
+      setAddingEvidenceId(null);
+    }
+  }
+
+  function handleLibraryItemUpdated(item: ReadingLibraryItem) {
+    setLibraryItems((current) =>
+      current
+        .map((summary) =>
+          summary.paper_key === item.paper_key
+            ? {
+                paper_key: item.paper_key,
+                source_item_id: item.source_item_id,
+                evidence_id: item.evidence_id,
+                run_id: item.run_id,
+                title: item.title,
+                abs_url: item.abs_url,
+                pdf_url: item.pdf_url,
+                summary: item.summary,
+                added_at: item.added_at,
+                updated_at: item.updated_at,
+                status: item.status,
+                text_coverage: item.text_coverage,
+                has_note: Boolean(item.note),
+                error: item.error
+              }
+            : summary
+        )
+        .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    );
+  }
+
   async function refreshArtifacts(runId: string) {
     const [evidence, coverage, audit, checkpointList] = await Promise.allSettled([
       getStatefulEvidence(runId),
@@ -237,6 +290,16 @@ ${chapters}
       const response = await getStatefulCheckpoints(runId);
       setCheckpoints(response.checkpoints);
     } catch { setCheckpoints([]); }
+  }
+
+  async function refreshLibrary() {
+    try {
+      const response = await listReadingLibrary();
+      setLibraryItems(response.items);
+      setActivePaperKey((current) => current ?? response.items[0]?.paper_key ?? null);
+    } catch {
+      setLibraryItems([]);
+    }
   }
 
   return (
@@ -260,6 +323,14 @@ ${chapters}
           <span>02</span>
           调研
         </button>
+        <button
+          className={stage === "library" ? "rail-step active" : "rail-step"}
+          type="button"
+          onClick={() => setStage("library")}
+        >
+          <span>03</span>
+          阅读库
+        </button>
       </aside>
 
       {/* Left pane: config or agent control */}
@@ -267,14 +338,14 @@ ${chapters}
         <div className="brand-row">
           <div>
             <p className="eyebrow">LitScout-RS</p>
-            <h1>{stage === "config" ? "连接配置" : "文献调研"}</h1>
+            <h1>{stage === "config" ? "连接配置" : stage === "library" ? "论文阅读" : "文献调研"}</h1>
           </div>
           <span className={`status-dot ${health?.status === "ok" ? "ok" : ""}`} />
         </div>
 
         {stage === "config" ? (
           <ConfigPanel config={config} health={health} onSave={handleConfigSaved} onNotice={setNotice} />
-        ) : (
+        ) : stage === "research" ? (
           <AgentControlPanel
             config={config}
             hasServerLlm={Boolean(health?.llm_enabled)}
@@ -288,6 +359,20 @@ ${chapters}
               }
             }}
           />
+        ) : (
+          <div className="status-stack">
+            <div className="phase-card">
+              <p className="eyebrow">Reading Library</p>
+              <h2>论文深读工作台</h2>
+              <p className="muted">从证据页加入 arXiv 论文后，在这里生成阅读笔记并围绕单篇论文追问。</p>
+            </div>
+            <dl className="status-list">
+              <div><dt>论文</dt><dd>{libraryItems.length}</dd></div>
+              <div><dt>已完成</dt><dd>{libraryItems.filter((item) => item.status === "ready").length}</dd></div>
+              <div><dt>失败</dt><dd>{libraryItems.filter((item) => item.status === "failed").length}</dd></div>
+              <div><dt>模型</dt><dd>{health?.llm_enabled ? "后端已启用" : "本页配置"}</dd></div>
+            </dl>
+          </div>
         )}
 
         {notice && (
@@ -307,8 +392,7 @@ ${chapters}
               ["evidence", "证据"],
               ["coverage", "覆盖"],
               ["audit", "引用"],
-              ["report", "报告"],
-              ["chat", "追问"]
+              ["report", "报告"]
             ] as const).map(([id, label]) => (
               <button
                 key={id}
@@ -329,6 +413,7 @@ ${chapters}
               <div>
                 <p className="eyebrow">运行状态</p>
                 <h2>进度、检查点与事件</h2>
+                <p className="telemetry-summary-hint">点击查看详细进度 · {progressLabel}</p>
               </div>
               <span className="badge">{Math.round(progress)}%</span>
             </summary>
@@ -375,16 +460,36 @@ ${chapters}
           {activeView === "plan" ? (
             <PlanTree run={agentRun} running={activity === "running"} onRevise={handleRevisePlan} onApprove={handleApproveRun} />
           ) : activeView === "evidence" ? (
-            <EvidenceMemoryView run={agentRun} memory={evidenceMemory} />
+            <EvidenceMemoryView
+              run={agentRun}
+              memory={evidenceMemory}
+              libraryItems={libraryItems}
+              addingEvidenceId={addingEvidenceId}
+              onAddToLibrary={handleAddToLibrary}
+            />
           ) : activeView === "coverage" ? (
             <CoverageMatrix run={agentRun} coverage={coverageReport} memory={evidenceMemory} />
           ) : activeView === "audit" ? (
             <CitationAuditView run={agentRun} audit={citationAudit} />
-          ) : activeView === "report" ? (
-            <ReportView markdown={reportPreview} canTranslate={Boolean(reportMarkdown)} translating={translating} onTranslate={handleTranslateReport} />
           ) : (
-            <AgentFollowup run={agentRun} onNotice={setNotice} />
+            <div className="report-workspace">
+              <ReportView markdown={reportPreview} canTranslate={Boolean(reportMarkdown)} translating={translating} onTranslate={handleTranslateReport} />
+              <ReportChat config={config} reportMarkdown={reportMarkdown} disabled={!reportMarkdown} onNotice={setNotice} />
+            </div>
           )}
+        </section>
+      )}
+      {stage === "library" && (
+        <section className="pane workspace-pane" aria-label="阅读库工作区">
+          <ReadingLibraryView
+            config={config}
+            items={libraryItems}
+            activePaperKey={activePaperKey}
+            onSelectPaper={setActivePaperKey}
+            onItemsChange={setLibraryItems}
+            onItemUpdated={handleLibraryItemUpdated}
+            onNotice={setNotice}
+          />
         </section>
       )}
     </main>

@@ -82,6 +82,127 @@ export interface EvidenceItem {
   support_score?: number | null;
 }
 
+export type ReadingStatus =
+  | "queued"
+  | "fetching_text"
+  | "fetching_jina_html"
+  | "fetching_jina_pdf"
+  | "downloading_pdf"
+  | "extracting_pdf_text"
+  | "text_ready"
+  | "generating_note"
+  | "ready"
+  | "text_failed"
+  | "note_failed"
+  | "failed";
+
+export type TextCoverage =
+  | "full_text_html"
+  | "full_text_pdf"
+  | "markdown_proxy"
+  | "partial_text"
+  | "abstract_only"
+  | "failed";
+
+export type NoteQuality = "full_text" | "abstract_only" | "unknown";
+
+export interface TextFetchAttempt {
+  kind: string;
+  status: string;
+  source_url?: string | null;
+  http_status?: number | null;
+  char_count?: number | null;
+  page_count?: number | null;
+  error?: string | null;
+  retry_after_ms?: number | null;
+  elapsed_ms?: number | null;
+}
+
+export interface PaperTextMeta {
+  coverage: TextCoverage;
+  source_url: string;
+  extractor: string;
+  char_count: number;
+  page_count?: number | null;
+  quality_score: number;
+  generated_at: string;
+  cache_ttl_seconds: number;
+  attempts: TextFetchAttempt[];
+}
+
+export interface PaperNote {
+  tldr: string;
+  motivation: string;
+  method: string;
+  result: string;
+  conclusion: string;
+  core_problem: string;
+  contributions: string[];
+  method_map: string[];
+  experiment_matrix: string[];
+  limitations: string[];
+  reproducibility_notes: string[];
+  relation_to_research_topic: string;
+  recommended_questions: string[];
+  markdown: string;
+  generated_at: string;
+}
+
+export interface PaperChatMessage {
+  role: string;
+  content: string;
+  created_at: string;
+}
+
+export interface ReadingLibraryItem {
+  paper_key: string;
+  source_item_id: string;
+  evidence_id: string;
+  run_id?: string | null;
+  title: string;
+  abs_url: string;
+  pdf_url?: string | null;
+  summary: string;
+  added_at: string;
+  updated_at: string;
+  status: ReadingStatus;
+  text_coverage?: TextCoverage | null;
+  text?: string | null;
+  text_source_url?: string | null;
+  text_meta?: PaperTextMeta | null;
+  note_quality?: NoteQuality | null;
+  note?: PaperNote | null;
+  chat_history: PaperChatMessage[];
+  error?: string | null;
+}
+
+export interface ReadingLibrarySummary {
+  paper_key: string;
+  source_item_id: string;
+  evidence_id: string;
+  run_id?: string | null;
+  title: string;
+  abs_url: string;
+  pdf_url?: string | null;
+  summary: string;
+  added_at: string;
+  updated_at: string;
+  status: ReadingStatus;
+  text_coverage?: TextCoverage | null;
+  text_meta?: PaperTextMeta | null;
+  note_quality?: NoteQuality | null;
+  has_note: boolean;
+  error?: string | null;
+}
+
+export interface ReadingLibraryResponse {
+  items: ReadingLibrarySummary[];
+}
+
+export interface ReadingLibraryItemResponse {
+  item: ReadingLibraryItem;
+}
+
 export interface EvidenceMemory {
   items: EvidenceItem[];
   query_attempts: QueryAttempt[];
@@ -212,14 +333,6 @@ export interface CoverageResponse {
 export interface CitationAuditResponse {
   run_id: string;
   citation_audit: CitationAuditReport;
-}
-
-export interface StatefulFollowupResponse {
-  run_id: string;
-  route:
-    | { route: "answer"; answer: string }
-    | { route: "incremental_research_required"; reason: string }
-    | Record<string, unknown>;
 }
 
 export interface ReportChatResponse {

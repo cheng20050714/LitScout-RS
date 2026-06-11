@@ -121,7 +121,8 @@ Web 工作台包含两个阶段：
 - Checkpoint/Branch 支持从 PlanReady checkpoint 创建新 run。
 - 中文 Markdown 报告预览。
 - 报告生成后可选调用 DeepSeek 翻译为中文，翻译结果会校验原始 URL 是否保留。
-- 报告追问和 Agent Followup 均用 Markdown 渲染回答。
+- 报告追问使用真实 LLM 流式输出，并用 Markdown 渲染回答。
+- 阅读库支持从 arXiv 证据加入论文、生成深度阅读笔记和单篇论文流式追问。
 
 ## API 摘要
 
@@ -146,7 +147,17 @@ Stage 3 新增：
 - `GET /api/runs/:run_id/citation-audit`：读取 CitationAuditReport。
 - `GET /api/runs/:run_id/checkpoints`：列出 checkpoint。
 - `POST /api/runs/:run_id/branch-from-checkpoint`：从 PlanReady checkpoint 创建新 run。
-- `POST /api/runs/:run_id/follow-up`：基于当前 EvidenceMemory 和报告追问；证据不足时返回增量研究建议。
+
+Stage 4 新增：
+
+- `GET /api/library`：列出阅读库论文。
+- `POST /api/library/items`：从 arXiv EvidenceItem 加入阅读库。
+- `GET /api/library/items/:paper_key`：读取单篇阅读库论文。
+- `DELETE /api/library/items/:paper_key`：删除单篇阅读库论文。
+- `POST /api/library/items/:paper_key/generate-note`：抓取论文可读文本并生成深度阅读笔记。
+- `POST /api/library/items/:paper_key/chat/stream`：基于单篇论文进行真实流式问答。
+
+旧的 `POST /api/runs/:run_id/follow-up` 已删除；调研页不再保留第二阶段“追问”链路。
 
 ## Rust 特性
 

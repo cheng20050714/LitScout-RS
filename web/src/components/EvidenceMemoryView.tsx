@@ -1,11 +1,25 @@
-import type { EvidenceItem, EvidenceMemory, ResearchRunRecord } from "../api/types";
+import type {
+  EvidenceItem,
+  EvidenceMemory,
+  ReadingLibrarySummary,
+  ResearchRunRecord
+} from "../api/types";
 
 interface EvidenceMemoryViewProps {
   run: ResearchRunRecord | null;
   memory: EvidenceMemory | null;
+  libraryItems: ReadingLibrarySummary[];
+  addingEvidenceId: string | null;
+  onAddToLibrary: (item: EvidenceItem) => void;
 }
 
-function EvidenceMemoryView({ run, memory }: EvidenceMemoryViewProps) {
+function EvidenceMemoryView({
+  run,
+  memory,
+  libraryItems,
+  addingEvidenceId,
+  onAddToLibrary
+}: EvidenceMemoryViewProps) {
   if (!run) {
     return (
       <div className="empty-state">
@@ -62,7 +76,16 @@ function EvidenceMemoryView({ run, memory }: EvidenceMemoryViewProps) {
             ) : (
               <div className="evidence-grid">
                 {items.map((item) => (
-                  <EvidenceCard key={item.evidence_id} item={item} memory={memory} />
+                  <EvidenceCard
+                    key={item.evidence_id}
+                    item={item}
+                    memory={memory}
+                    inLibrary={libraryItems.some(
+                      (libraryItem) => libraryItem.source_item_id === item.source_item_id
+                    )}
+                    adding={addingEvidenceId === item.evidence_id}
+                    onAddToLibrary={onAddToLibrary}
+                  />
                 ))}
               </div>
             )}
@@ -99,16 +122,43 @@ function EvidenceMemoryView({ run, memory }: EvidenceMemoryViewProps) {
   );
 }
 
-function EvidenceCard({ item, memory }: { item: EvidenceItem; memory: EvidenceMemory }) {
+function EvidenceCard({
+  item,
+  memory,
+  inLibrary,
+  adding,
+  onAddToLibrary
+}: {
+  item: EvidenceItem;
+  memory: EvidenceMemory;
+  inLibrary: boolean;
+  adding: boolean;
+  onAddToLibrary: (item: EvidenceItem) => void;
+}) {
   const attempts = memory.query_attempts.filter((attempt) =>
     item.query_attempt_ids.includes(attempt.query_id)
   );
+  const isArxiv = String(item.source_kind).toLowerCase() === "arxiv";
 
   return (
     <article className="evidence-card">
       <div className="evidence-card-top">
-        <span className="badge">{sourceLabel(item.source_kind)}</span>
-        <span className="badge">{item.citation_id}</span>
+        <div className="evidence-badges">
+          <span className="badge">{sourceLabel(item.source_kind)}</span>
+          <span className="badge">{item.citation_id}</span>
+        </div>
+        {isArxiv && (
+          <button
+            className={`evidence-add-button${inLibrary ? " added" : ""}`}
+            type="button"
+            title={inLibrary ? "已加入阅读库" : "加入阅读库"}
+            disabled={inLibrary || adding}
+            onClick={() => onAddToLibrary(item)}
+            aria-label={inLibrary ? "已加入阅读库" : "加入阅读库"}
+          >
+            {adding ? "..." : inLibrary ? "✓" : "+"}
+          </button>
+        )}
       </div>
       <h3>
         <a href={item.url} target="_blank" rel="noreferrer">

@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::agent::followup_router::FollowupRoute;
 use crate::agent::orchestrator::StatefulRunEvent;
 use crate::checkpoint::Checkpoint;
 use crate::model::{
@@ -70,17 +69,6 @@ pub struct ReviseStatefulPlanRequest {
     pub user_feedback: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct StatefulFollowupRequest {
-    pub question: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct StatefulFollowupResponse {
-    pub run_id: String,
-    pub route: FollowupRoute,
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct CheckpointListResponse {
     pub run_id: String,
@@ -98,6 +86,35 @@ pub struct ReportChatRequest {
 #[derive(Debug, Clone, Serialize)]
 pub struct ReportChatResponse {
     pub answer: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ReadingLibraryResponse {
+    pub items: Vec<crate::reading::models::ReadingLibrarySummary>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AddReadingLibraryItemRequest {
+    pub run_id: Option<String>,
+    pub evidence: crate::model::EvidenceItem,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ReadingLibraryItemResponse {
+    pub item: crate::reading::models::ReadingLibraryItem,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GenerateReadingNoteRequest {
+    #[serde(default)]
+    pub config: FrontendConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PaperChatRequest {
+    pub question: String,
+    #[serde(default)]
+    pub config: FrontendConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]

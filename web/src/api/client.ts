@@ -8,10 +8,11 @@ import type {
   CoverageResponse,
   EvidenceResponse,
   QueryPortfolio,
+  ReadingLibraryItemResponse,
+  ReadingLibraryResponse,
   ReportTranslateResponse,
   ReportChatResponse,
   RunPolicy,
-  StatefulFollowupResponse,
   StatefulRunResponse,
   StatefulRunStreamEvent
 } from "./types";
@@ -131,18 +132,6 @@ export async function branchStatefulRun(
   return readJson<StatefulRunResponse>(response);
 }
 
-export async function askStatefulRun(
-  runId: string,
-  question: string
-): Promise<StatefulFollowupResponse> {
-  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/follow-up`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question })
-  });
-  return readJson<StatefulFollowupResponse>(response);
-}
-
 export async function askReport(
   question: string,
   reportMarkdown: string,
@@ -158,6 +147,75 @@ export async function askReport(
     })
   });
   return readJson<ReportChatResponse>(response);
+}
+
+export async function listReadingLibrary(): Promise<ReadingLibraryResponse> {
+  const response = await fetch("/api/library");
+  return readJson<ReadingLibraryResponse>(response);
+}
+
+export async function addReadingLibraryItem(
+  runId: string | null,
+  evidence: unknown
+): Promise<ReadingLibraryItemResponse> {
+  const response = await fetch("/api/library/items", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ run_id: runId, evidence })
+  });
+  return readJson<ReadingLibraryItemResponse>(response);
+}
+
+export async function getReadingLibraryItem(
+  paperKey: string
+): Promise<ReadingLibraryItemResponse> {
+  const response = await fetch(`/api/library/items/${encodeURIComponent(paperKey)}`);
+  return readJson<ReadingLibraryItemResponse>(response);
+}
+
+export async function deleteReadingLibraryItem(
+  paperKey: string
+): Promise<ReadingLibraryResponse> {
+  const response = await fetch(`/api/library/items/${encodeURIComponent(paperKey)}`, {
+    method: "DELETE"
+  });
+  return readJson<ReadingLibraryResponse>(response);
+}
+
+export async function generateReadingNote(
+  paperKey: string,
+  config: FrontendConfig
+): Promise<ReadingLibraryItemResponse> {
+  const response = await fetch(`/api/library/items/${encodeURIComponent(paperKey)}/generate-note`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ config })
+  });
+  return readJson<ReadingLibraryItemResponse>(response);
+}
+
+export async function askPaperStream(
+  paperKey: string,
+  question: string,
+  config: FrontendConfig,
+  onEvent: (event: ChatStreamEvent) => void
+): Promise<void> {
+  const response = await fetch(`/api/library/items/${encodeURIComponent(paperKey)}/chat/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, config })
+  });
+  if (!response.ok || !response.body) {
+    await readJson<unknown>(response);
+    return;
+  }
+  await readSse(response, (event) => {
+    const chatEvent = event as ChatStreamEvent;
+    onEvent(chatEvent);
+    if (chatEvent.event === "failed") {
+      throw new Error(chatEvent.data.error ?? "论文追问失败。");
+    }
+  });
 }
 
 export async function askReportStream(

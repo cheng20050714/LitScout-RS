@@ -8,6 +8,7 @@ mod error;
 mod llm;
 mod model;
 mod ranking;
+mod reading;
 mod run_policy;
 mod server;
 mod sources;
