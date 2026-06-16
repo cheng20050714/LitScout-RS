@@ -4,6 +4,7 @@ export interface FrontendConfig {
   deepseek_model?: string;
   deepseek_side_model?: string;
   github_token?: string;
+  semantic_scholar_api_key?: string;
 }
 
 export type ResearchRunState =
@@ -20,6 +21,8 @@ export interface RunPolicy {
   max_aspects_per_round: number;
   github_budget: number;
   arxiv_budget: number;
+  academic_extra_enabled: boolean;
+  academic_budget: number;
   auto_approve_plan: boolean;
   allow_github_enrich: boolean;
   require_citation_audit: boolean;
@@ -65,6 +68,11 @@ export interface QueryAttempt {
   started_at: string;
   finished_at?: string | null;
   result_count: number;
+  source_kind?: SourceKind | null;
+  http_status?: number | null;
+  rate_limit_info?: string | null;
+  parser_error?: string | null;
+  is_citeable?: boolean;
   error?: string | null;
 }
 
@@ -74,7 +82,7 @@ export interface EvidenceItem {
   citation_id: string;
   chapter_ids: string[];
   query_attempt_ids: string[];
-  source_kind: "github" | "arxiv" | "GitHub" | "Arxiv";
+  source_kind: SourceKind;
   title: string;
   url: string;
   evidence_note_zh: string;
@@ -210,9 +218,24 @@ export interface EvidenceMemory {
 }
 
 export interface SourceQueryLineage {
+  lineage_id?: string;
   source_item_id: string;
+  chapter_id?: string | null;
+  source_kind?: SourceKind | null;
   query_attempt_ids: string[];
+  returned_item_ids?: string[];
+  merged_from_item_ids?: string[];
 }
+
+export type SourceKind =
+  | "github"
+  | "arxiv"
+  | "academic_index"
+  | "bibliography"
+  | "GitHub"
+  | "Arxiv"
+  | "AcademicIndex"
+  | "Bibliography";
 
 export type GapKind = "query_gap" | "source_gap";
 export type CoverageRecommendation = "no_action" | "suggest_new_query" | "out_of_scope";

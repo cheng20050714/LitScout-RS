@@ -23,6 +23,19 @@ pub struct Cli {
 
     #[arg(
         long,
+        help = "Enable opt-in Stage A academic sources: Semantic Scholar and DBLP"
+    )]
+    pub academic_extra: bool,
+
+    #[arg(
+        long,
+        default_value_t = 10,
+        help = "Maximum results per academic extra source"
+    )]
+    pub academic_limit: usize,
+
+    #[arg(
+        long,
         value_name = "PATH",
         default_value = "reports",
         help = "Output report file or directory"
@@ -125,6 +138,9 @@ pub struct Cli {
 
     #[arg(long, env = "GITHUB_TOKEN", hide_env_values = true)]
     pub github_token: Option<String>,
+
+    #[arg(long, env = "SEMANTIC_SCHOLAR_API_KEY", hide_env_values = true)]
+    pub semantic_scholar_api_key: Option<String>,
 }
 
 impl Cli {

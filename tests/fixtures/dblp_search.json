@@ -1,0 +1,35 @@
+{
+  "result": {
+    "hits": {
+      "@total": "2",
+      "hit": [
+        {
+          "info": {
+            "key": "conf/test/AgentRust2026",
+            "title": "Tool Calling Agents in Rust.",
+            "authors": {
+              "author": ["Ada Lovelace", "Alan Turing"]
+            },
+            "venue": "TestConf",
+            "year": "2026",
+            "doi": "10.0000/test.2",
+            "ee": "https://doi.org/10.0000/test.2",
+            "url": "https://dblp.org/rec/conf/test/AgentRust2026"
+          }
+        },
+        {
+          "info": {
+            "key": "journals/test/CodeAgents2025",
+            "title": "Evaluation of Code Agents.",
+            "authors": {
+              "author": "Grace Hopper"
+            },
+            "venue": "Journal of Agent Evaluation",
+            "year": "2025",
+            "url": "https://dblp.org/rec/journals/test/CodeAgents2025"
+          }
+        }
+      ]
+    }
+  }
+}

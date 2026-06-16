@@ -54,6 +54,8 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    let academic_extra_enabled = cli.academic_extra;
+    let academic_budget = cli.academic_limit;
     let query = cli.into_query()?;
     let run = orchestrator::create_run(
         query.topic,
@@ -62,6 +64,8 @@ async fn main() -> anyhow::Result<()> {
         RunPolicy {
             github_budget: query.github_limit,
             arxiv_budget: query.arxiv_limit,
+            academic_extra_enabled,
+            academic_budget,
             allow_github_enrich: true,
             ..RunPolicy::default()
         },

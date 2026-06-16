@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::agent::{
-    arxiv_scout, citation_auditor, coverage_critic, evidence, github_scout,
+    academic_scout, arxiv_scout, citation_auditor, coverage_critic, evidence, github_scout,
     middleware::{
         AgentContext, AgentMiddleware, CitationGuard, JsonSchemaGuard, TokenBudgetTracker,
     },
@@ -209,7 +209,12 @@ async fn continue_from_plan_ready(
         tx.as_ref(),
     )
     .await?;
-    trace_planned_tool_calls(&trace, &run.query_portfolio).await?;
+    trace_planned_tool_calls(
+        &trace,
+        &run.query_portfolio,
+        run.policy.academic_extra_enabled,
+    )
+    .await?;
 
     let mut github_config = app_config.clone();
     github_config.enrich = app_config.enrich || run.policy.allow_github_enrich;
@@ -219,13 +224,27 @@ async fn continue_from_plan_ready(
     );
     let (github_repos, github_attempts, github_lineage) = github_result?;
     let (arxiv_papers, arxiv_attempts, arxiv_lineage) = arxiv_result?;
+    let (academic_items, academic_attempts, academic_lineage) = if run.policy.academic_extra_enabled
+    {
+        academic_scout::scout_academic_extra(
+            &run.query_portfolio,
+            &app_config,
+            run.policy.academic_budget,
+            1,
+        )
+        .await?
+    } else {
+        (Vec::new(), Vec::new(), Vec::new())
+    };
     let query_attempts = github_attempts
         .into_iter()
         .chain(arxiv_attempts)
+        .chain(academic_attempts)
         .collect::<Vec<QueryAttempt>>();
     let source_lineage = github_lineage
         .into_iter()
         .chain(arxiv_lineage)
+        .chain(academic_lineage)
         .collect::<Vec<_>>();
     for attempt in &query_attempts {
         trace
@@ -237,8 +256,10 @@ async fn continue_from_plan_ready(
             })
             .await?;
     }
-    if github_repos.is_empty() && arxiv_papers.is_empty() {
-        let message = "GitHub 与 arXiv 均未返回可用结果，无法生成 stateful report。".to_string();
+    if github_repos.is_empty() && arxiv_papers.is_empty() && academic_items.is_empty() {
+        let message =
+            "GitHub、arXiv 与已启用的扩展学术源均未返回可用结果，无法生成 stateful report。"
+                .to_string();
         run.warnings.push(message.clone());
         transition(
             run,
@@ -271,6 +292,7 @@ async fn continue_from_plan_ready(
         &app_config,
         github_repos,
         arxiv_papers,
+        academic_items,
         query_attempts,
         source_lineage,
     )?;
@@ -708,7 +730,11 @@ async fn send_checkpoint(tx: Option<&mpsc::Sender<StatefulRunEvent>>, checkpoint
     }
 }
 
-async fn trace_planned_tool_calls(trace: &TraceWriter, portfolio: &[QueryPortfolio]) -> Result<()> {
+async fn trace_planned_tool_calls(
+    trace: &TraceWriter,
+    portfolio: &[QueryPortfolio],
+    include_academic_extra: bool,
+) -> Result<()> {
     for item in portfolio {
         for query in &item.github_queries {
             trace
@@ -728,8 +754,36 @@ async fn trace_planned_tool_calls(trace: &TraceWriter, portfolio: &[QueryPortfol
                 })
                 .await?;
         }
+        if include_academic_extra {
+            for query in academic_queries_for_trace(item) {
+                trace
+                    .append(&TraceEvent::ToolCallStarted {
+                        tool: "semantic_scholar".to_string(),
+                        query: query.clone(),
+                        at: Utc::now(),
+                    })
+                    .await?;
+                trace
+                    .append(&TraceEvent::ToolCallStarted {
+                        tool: "dblp".to_string(),
+                        query,
+                        at: Utc::now(),
+                    })
+                    .await?;
+            }
+        }
     }
     Ok(())
+}
+
+fn academic_queries_for_trace(item: &QueryPortfolio) -> Vec<String> {
+    let mut queries = item.arxiv_queries.clone();
+    for query in &item.github_queries {
+        if !queries.iter().any(|existing| existing == query) {
+            queries.push(query.clone());
+        }
+    }
+    queries
 }
 
 fn llm_config_can_call(llm_config: &LlmConfig) -> bool {
@@ -854,6 +908,7 @@ mod tests {
         let root = temp_root("stage3-create-run-fallback");
         let app_config = AppConfig {
             github_token: None,
+            semantic_scholar_api_key: None,
             output: root.join("reports"),
             cache_dir: root.join("cache"),
             session_dir: root.join("sessions"),

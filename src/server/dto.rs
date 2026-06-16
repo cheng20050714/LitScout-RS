@@ -144,4 +144,5 @@ pub struct FrontendConfig {
     pub deepseek_model: Option<String>,
     pub deepseek_side_model: Option<String>,
     pub github_token: Option<String>,
+    pub semantic_scholar_api_key: Option<String>,
 }

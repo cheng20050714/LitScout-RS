@@ -1,0 +1,36 @@
+{
+  "total": 2,
+  "data": [
+    {
+      "paperId": "abc123",
+      "title": "Tool Calling Agents in Rust",
+      "abstract": "This paper studies tool-calling agents implemented with Rust runtimes.",
+      "year": 2026,
+      "venue": "TestConf",
+      "citationCount": 42,
+      "url": "https://www.semanticscholar.org/paper/abc123",
+      "authors": [
+        { "name": "Ada Lovelace" },
+        { "name": "Alan Turing" }
+      ],
+      "externalIds": {
+        "DOI": "10.0000/test.1"
+      },
+      "fieldsOfStudy": ["Computer Science"]
+    },
+    {
+      "paperId": "def456",
+      "title": "Evaluation of Code Agents",
+      "abstract": null,
+      "year": 2025,
+      "venue": "EvalBench",
+      "citationCount": 7,
+      "url": "https://www.semanticscholar.org/paper/def456",
+      "authors": [
+        { "name": "Grace Hopper" }
+      ],
+      "externalIds": {},
+      "fieldsOfStudy": ["Computer Science"]
+    }
+  ]
+}

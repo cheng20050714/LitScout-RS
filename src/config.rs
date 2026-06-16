@@ -11,6 +11,7 @@ pub const DEFAULT_LLM_TIMEOUT_SECS: u64 = 120;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AppConfig {
     pub github_token: Option<String>,
+    pub semantic_scholar_api_key: Option<String>,
     pub output: PathBuf,
     pub cache_dir: PathBuf,
     pub session_dir: PathBuf,
@@ -31,6 +32,7 @@ impl AppConfig {
 
         Ok(Self {
             github_token: cli.github_token.clone(),
+            semantic_scholar_api_key: cli.semantic_scholar_api_key.clone(),
             output: cli.output.clone(),
             cache_dir: cli.cache_dir.clone(),
             session_dir: cli.session_dir.clone(),

@@ -6,7 +6,8 @@ use uuid::Uuid;
 use crate::config::AppConfig;
 use crate::error::Result;
 use crate::model::{
-    stable_arxiv_id, ArxivPaper, QueryAttempt, QueryPortfolio, SearchQuery, SourceQueryLineage,
+    stable_arxiv_id, ArxivPaper, QueryAttempt, QueryPortfolio, SearchQuery, SourceKind,
+    SourceQueryLineage,
 };
 use crate::sources::arxiv;
 
@@ -48,8 +49,20 @@ pub async fn scout_arxiv(
                         );
                     }
                     source_lineage.extend(result.iter().map(|paper| SourceQueryLineage {
+                        lineage_id: format!(
+                            "lin-{}-{}",
+                            query_id,
+                            stable_arxiv_id(&paper.arxiv_id)
+                        ),
                         source_item_id: format!("arxiv:{}", stable_arxiv_id(&paper.arxiv_id)),
+                        chapter_id: Some(item.chapter_id.clone()),
+                        source_kind: Some(SourceKind::Arxiv),
                         query_attempt_ids: vec![query_id.clone()],
+                        returned_item_ids: vec![format!(
+                            "arxiv:{}",
+                            stable_arxiv_id(&paper.arxiv_id)
+                        )],
+                        merged_from_item_ids: Vec::new(),
                     }));
                     papers.append(&mut result);
                     attempts.push(QueryAttempt {
@@ -61,6 +74,11 @@ pub async fn scout_arxiv(
                         started_at,
                         finished_at: Some(Utc::now()),
                         result_count,
+                        source_kind: Some(SourceKind::Arxiv),
+                        http_status: None,
+                        rate_limit_info: None,
+                        parser_error: None,
+                        is_citeable: true,
                         error: None,
                     });
                 }
@@ -74,6 +92,11 @@ pub async fn scout_arxiv(
                         started_at,
                         finished_at: Some(Utc::now()),
                         result_count: 0,
+                        source_kind: Some(SourceKind::Arxiv),
+                        http_status: None,
+                        rate_limit_info: None,
+                        parser_error: None,
+                        is_citeable: false,
                         error: Some(err.to_string()),
                     });
                 }

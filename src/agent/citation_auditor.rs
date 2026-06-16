@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-use crate::model::{CitationAuditReport, CitationLedger, EvidenceMemory, ReportDraft};
+use crate::model::{CitationAuditReport, CitationLedger, EvidenceMemory, ReportDraft, SourceKind};
 
 pub fn audit_citations(
     draft: &ReportDraft,
@@ -60,12 +60,12 @@ pub fn audit_citations(
     } else {
         cited_paragraphs as f64 / total_paragraphs as f64
     };
-    let source_kinds = memory
+    let source_classes = memory
         .items
         .iter()
-        .map(|item| item.source_kind)
+        .map(|item| source_class(item.source_kind))
         .collect::<HashSet<_>>();
-    let source_diversity_score = (source_kinds.len() as f64 / 2.0).min(1.0);
+    let source_diversity_score = (source_classes.len() as f64 / 4.0).min(1.0);
     let mut freshness_warnings = Vec::new();
     if memory.items.is_empty() {
         freshness_warnings.push("当前 EvidenceMemory 为空，无法评估来源新鲜度。".to_string());
@@ -78,6 +78,15 @@ pub fn audit_citations(
         freshness_warnings,
         unsupported_paragraph_warnings,
         external_url_violations,
+    }
+}
+
+fn source_class(kind: SourceKind) -> &'static str {
+    match kind {
+        SourceKind::GitHub => "implementation",
+        SourceKind::Arxiv => "preprint",
+        SourceKind::AcademicIndex => "academic_index",
+        SourceKind::Bibliography => "bibliography",
     }
 }
 

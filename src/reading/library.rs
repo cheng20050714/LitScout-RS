@@ -268,6 +268,7 @@ mod tests {
     fn test_config(session_dir: std::path::PathBuf) -> AppConfig {
         AppConfig {
             github_token: None,
+            semantic_scholar_api_key: None,
             output: session_dir.join("reports"),
             cache_dir: session_dir.join("cache"),
             session_dir,

@@ -6,6 +6,7 @@
 //! coverage_critic, citation_auditor, and report_chat.
 //! Writer refuses to produce a final template report when LLM drafting fails.
 
+pub mod academic_scout;
 pub mod arxiv_scout;
 pub mod citation_auditor;
 pub mod coverage_critic;

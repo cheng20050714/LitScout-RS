@@ -658,6 +658,9 @@ fn effective_app_config(state: &AppState, frontend: &FrontendConfig) -> AppConfi
     if let Some(token) = non_empty(frontend.github_token.as_deref()) {
         app_config.github_token = Some(token.to_string());
     }
+    if let Some(key) = non_empty(frontend.semantic_scholar_api_key.as_deref()) {
+        app_config.semantic_scholar_api_key = Some(key.to_string());
+    }
     app_config
 }
 
@@ -709,6 +712,7 @@ mod tests {
     fn app_config() -> AppConfig {
         AppConfig {
             github_token: None,
+            semantic_scholar_api_key: None,
             output: PathBuf::from("reports"),
             cache_dir: PathBuf::from(".litscout-cache"),
             session_dir: PathBuf::from("sessions"),

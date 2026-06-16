@@ -5,6 +5,8 @@
 [run]
 github_limit = 10
 arxiv_limit = 10
+academic_extra = false
+academic_limit = 10
 output = "reports"
 cache_dir = ".litscout-cache"
 cache_ttl_hours = 24
@@ -15,6 +17,9 @@ enrich = false
 
 [github]
 token_env = "GITHUB_TOKEN"
+
+[semantic_scholar]
+api_key_env = "SEMANTIC_SCHOLAR_API_KEY"
 
 [llm.deepseek]
 enabled = false

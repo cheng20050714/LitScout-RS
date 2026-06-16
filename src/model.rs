@@ -37,10 +37,14 @@ pub struct ArxivPaper {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum SourceKind {
+    #[serde(rename = "github", alias = "git_hub", alias = "GitHub")]
     GitHub,
+    #[serde(rename = "arxiv", alias = "Arxiv")]
     Arxiv,
+    AcademicIndex,
+    Bibliography,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -143,17 +147,37 @@ impl Default for ScoreBreakdown {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "lowercase")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SourceMetadata {
+    #[serde(rename = "github", alias = "git_hub")]
     GitHub {
         stars: u64,
         forks: u64,
         language: Option<String>,
         topics: Vec<String>,
     },
+    #[serde(rename = "arxiv")]
     Arxiv {
         authors: Vec<String>,
         categories: Vec<String>,
+    },
+    AcademicIndex {
+        authors: Vec<String>,
+        venue: Option<String>,
+        year: Option<i32>,
+        doi: Option<String>,
+        citation_count: Option<u64>,
+        native_id: String,
+        source_name: String,
+    },
+    Bibliography {
+        authors: Vec<String>,
+        venue: Option<String>,
+        year: Option<i32>,
+        doi: Option<String>,
+        citation_count: Option<u64>,
+        native_id: String,
+        source_name: String,
     },
 }
 
@@ -270,6 +294,16 @@ pub struct QueryAttempt {
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
     pub result_count: usize,
+    #[serde(default)]
+    pub source_kind: Option<SourceKind>,
+    #[serde(default)]
+    pub http_status: Option<u16>,
+    #[serde(default)]
+    pub rate_limit_info: Option<String>,
+    #[serde(default)]
+    pub parser_error: Option<String>,
+    #[serde(default = "default_query_attempt_citeable")]
+    pub is_citeable: bool,
     pub error: Option<String>,
 }
 
@@ -290,8 +324,18 @@ pub struct EvidenceItem {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceQueryLineage {
+    #[serde(default)]
+    pub lineage_id: String,
     pub source_item_id: String,
+    #[serde(default)]
+    pub chapter_id: Option<String>,
+    #[serde(default)]
+    pub source_kind: Option<SourceKind>,
     pub query_attempt_ids: Vec<String>,
+    #[serde(default)]
+    pub returned_item_ids: Vec<String>,
+    #[serde(default)]
+    pub merged_from_item_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -410,6 +454,10 @@ fn excerpt(text: &str, max_chars: usize) -> String {
     out
 }
 
+fn default_query_attempt_citeable() -> bool {
+    true
+}
+
 pub fn arxiv_id_from_abs_url(id_url: &str) -> String {
     id_url
         .rsplit_once("/abs/")
@@ -523,5 +571,58 @@ mod tests {
         assert_eq!(ledger.citations.len(), 1);
         assert_eq!(ledger.citations[0].id, "C1");
         assert_eq!(ledger.citations[0].source_item_id, "arxiv:2501.00001");
+    }
+
+    #[test]
+    fn query_attempt_deserializes_legacy_shape_with_defaults() {
+        let json = r#"{
+            "query_id": "gh-1",
+            "source": "github",
+            "query": "rust agent",
+            "chapter_id": "ch-1",
+            "round": 1,
+            "started_at": "2026-05-30T12:00:00Z",
+            "finished_at": null,
+            "result_count": 1,
+            "error": null
+        }"#;
+
+        let attempt: QueryAttempt = serde_json::from_str(json).expect("legacy attempt parses");
+
+        assert_eq!(attempt.source_kind, None);
+        assert!(attempt.is_citeable);
+        assert_eq!(attempt.http_status, None);
+    }
+
+    #[test]
+    fn source_kind_keeps_legacy_wire_names() {
+        assert_eq!(
+            serde_json::to_string(&SourceKind::GitHub).expect("serializes"),
+            "\"github\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SourceKind::Arxiv).expect("serializes"),
+            "\"arxiv\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SourceKind::AcademicIndex).expect("serializes"),
+            "\"academic_index\""
+        );
+    }
+
+    #[test]
+    fn source_lineage_deserializes_legacy_shape_with_defaults() {
+        let json = r#"{
+            "source_item_id": "github:acme/rust-agent",
+            "query_attempt_ids": ["gh-1"]
+        }"#;
+
+        let lineage: SourceQueryLineage =
+            serde_json::from_str(json).expect("legacy lineage parses");
+
+        assert_eq!(lineage.source_item_id, "github:acme/rust-agent");
+        assert!(lineage.lineage_id.is_empty());
+        assert_eq!(lineage.chapter_id, None);
+        assert!(lineage.returned_item_ids.is_empty());
     }
 }

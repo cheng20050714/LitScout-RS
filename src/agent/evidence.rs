@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::config::AppConfig;
 use crate::error::Result;
@@ -23,6 +23,7 @@ pub fn build_evidence_memory(
     app_config: &AppConfig,
     github_repos: Vec<GitHubRepo>,
     arxiv_papers: Vec<ArxivPaper>,
+    extra_source_items: Vec<SourceItem>,
     query_attempts: Vec<QueryAttempt>,
     source_lineage: Vec<SourceQueryLineage>,
 ) -> Result<EvidenceBuildResult> {
@@ -31,6 +32,7 @@ pub fn build_evidence_memory(
         .map(SourceItem::from)
         .collect::<Vec<SourceItem>>();
     source_items.extend(arxiv_papers.iter().map(SourceItem::from));
+    source_items.extend(extra_source_items);
     let deduped = dedup::dedup_by_id(source_items);
     let mut ranked_items = ranking::rank_items(query, deduped);
     let rules = classify::load_rules(app_config.tags_file.as_deref())?;
@@ -49,13 +51,7 @@ pub fn build_evidence_memory(
         memory: EvidenceMemory {
             items,
             query_attempts,
-            source_lineage: lineage_by_source
-                .into_iter()
-                .map(|(source_item_id, query_attempt_ids)| SourceQueryLineage {
-                    source_item_id,
-                    query_attempt_ids: query_attempt_ids.into_iter().collect(),
-                })
-                .collect(),
+            source_lineage: lineage_by_source.values().cloned().collect(),
         },
         ranked_items,
         groups,
@@ -67,29 +63,34 @@ fn evidence_from_source_item(
     item: &SourceItem,
     citations: &CitationLedger,
     attempts: &[QueryAttempt],
-    lineage_by_source: &BTreeMap<String, BTreeSet<String>>,
+    lineage_by_source: &BTreeMap<String, SourceQueryLineage>,
 ) -> Option<EvidenceItem> {
     let citation = citations
         .citations
         .iter()
         .find(|citation| citation.source_item_id == item.id)?;
-    let matching_query_ids = lineage_by_source.get(&item.id);
+    let lineage = lineage_by_source.get(&item.id)?;
     let matching_attempts = attempts
         .iter()
         .filter(|attempt| attempt.error.is_none())
-        .filter(|attempt| match matching_query_ids {
-            Some(ids) => ids.contains(&attempt.query_id),
-            None => attempt.source == source_name(item.kind),
-        })
+        .filter(|attempt| lineage.query_attempt_ids.contains(&attempt.query_id))
         .collect::<Vec<_>>();
     let query_attempt_ids = matching_attempts
         .iter()
         .map(|attempt| attempt.query_id.clone())
         .collect::<Vec<_>>();
+    if query_attempt_ids.is_empty() {
+        return None;
+    }
     let chapter_ids = matching_attempts
         .iter()
         .map(|attempt| attempt.chapter_id.clone())
-        .collect::<BTreeSet<_>>()
+        .fold(Vec::new(), |mut ids, id| {
+            if !ids.iter().any(|existing| existing == &id) {
+                ids.push(id);
+            }
+            ids
+        })
         .into_iter()
         .take(1)
         .collect::<Vec<_>>();
@@ -111,19 +112,45 @@ fn evidence_from_source_item(
 
 fn lineage_by_source(
     source_lineage: Vec<SourceQueryLineage>,
-) -> BTreeMap<String, BTreeSet<String>> {
-    let mut by_source: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+) -> BTreeMap<String, SourceQueryLineage> {
+    let mut by_source: BTreeMap<String, SourceQueryLineage> = BTreeMap::new();
     for lineage in source_lineage {
-        let ids = by_source.entry(lineage.source_item_id).or_default();
-        ids.extend(lineage.query_attempt_ids);
+        let entry = by_source
+            .entry(lineage.source_item_id.clone())
+            .or_insert_with(|| SourceQueryLineage {
+                lineage_id: if lineage.lineage_id.is_empty() {
+                    format!("lin-{}", lineage.source_item_id)
+                } else {
+                    lineage.lineage_id.clone()
+                },
+                source_item_id: lineage.source_item_id.clone(),
+                chapter_id: lineage.chapter_id.clone(),
+                source_kind: lineage.source_kind,
+                query_attempt_ids: Vec::new(),
+                returned_item_ids: Vec::new(),
+                merged_from_item_ids: Vec::new(),
+            });
+        if entry.chapter_id.is_none() {
+            entry.chapter_id = lineage.chapter_id;
+        }
+        if entry.source_kind.is_none() {
+            entry.source_kind = lineage.source_kind;
+        }
+        extend_unique(&mut entry.query_attempt_ids, lineage.query_attempt_ids);
+        extend_unique(&mut entry.returned_item_ids, lineage.returned_item_ids);
+        extend_unique(
+            &mut entry.merged_from_item_ids,
+            lineage.merged_from_item_ids,
+        );
     }
     by_source
 }
 
-fn source_name(kind: SourceKind) -> &'static str {
-    match kind {
-        SourceKind::GitHub => "github",
-        SourceKind::Arxiv => "arxiv",
+fn extend_unique(target: &mut Vec<String>, values: Vec<String>) {
+    for value in values {
+        if !target.iter().any(|existing| existing == &value) {
+            target.push(value);
+        }
     }
 }
 
@@ -131,6 +158,8 @@ fn build_evidence_note(item: &SourceItem) -> String {
     let source = match item.kind {
         SourceKind::GitHub => "GitHub 仓库",
         SourceKind::Arxiv => "arXiv 论文",
+        SourceKind::AcademicIndex => "学术索引记录",
+        SourceKind::Bibliography => "书目元数据",
     };
     format!(
         "{} `{}`：{}",
@@ -182,15 +211,26 @@ mod tests {
             &test_config(),
             vec![sample_repo()],
             Vec::new(),
+            Vec::new(),
             attempts,
             vec![
                 SourceQueryLineage {
+                    lineage_id: "lin-gh-1".to_string(),
                     source_item_id: "github:acme/rust-agent".to_string(),
+                    chapter_id: Some("ch-1".to_string()),
+                    source_kind: Some(crate::model::SourceKind::GitHub),
                     query_attempt_ids: vec!["gh-1".to_string()],
+                    returned_item_ids: vec!["github:acme/rust-agent".to_string()],
+                    merged_from_item_ids: Vec::new(),
                 },
                 SourceQueryLineage {
+                    lineage_id: "lin-gh-2".to_string(),
                     source_item_id: "github:acme/rust-agent".to_string(),
+                    chapter_id: Some("ch-2".to_string()),
+                    source_kind: Some(crate::model::SourceKind::GitHub),
                     query_attempt_ids: vec!["gh-2".to_string()],
+                    returned_item_ids: vec!["github:acme/rust-agent".to_string()],
+                    merged_from_item_ids: Vec::new(),
                 },
             ],
         )
@@ -222,10 +262,16 @@ mod tests {
             &test_config(),
             vec![sample_repo()],
             Vec::new(),
+            Vec::new(),
             attempts,
             vec![SourceQueryLineage {
+                lineage_id: "lin-gh-2".to_string(),
                 source_item_id: "github:acme/rust-agent".to_string(),
+                chapter_id: Some("ch-2".to_string()),
+                source_kind: Some(crate::model::SourceKind::GitHub),
                 query_attempt_ids: vec!["gh-2".to_string()],
+                returned_item_ids: vec!["github:acme/rust-agent".to_string()],
+                merged_from_item_ids: Vec::new(),
             }],
         )
         .expect("evidence memory should build");
@@ -238,6 +284,69 @@ mod tests {
     }
 
     #[test]
+    fn preserves_source_lineage_metadata_after_merge() {
+        let query = SearchQuery {
+            topic: "rust agent".to_string(),
+            github_limit: 10,
+            arxiv_limit: 10,
+        };
+        let result = build_evidence_memory(
+            &query,
+            &test_config(),
+            vec![sample_repo()],
+            Vec::new(),
+            Vec::new(),
+            vec![
+                sample_attempt("gh-1", "ch-1"),
+                sample_attempt("gh-2", "ch-2"),
+            ],
+            vec![
+                SourceQueryLineage {
+                    lineage_id: "lin-gh-1".to_string(),
+                    source_item_id: "github:acme/rust-agent".to_string(),
+                    chapter_id: Some("ch-1".to_string()),
+                    source_kind: Some(crate::model::SourceKind::GitHub),
+                    query_attempt_ids: vec!["gh-1".to_string()],
+                    returned_item_ids: vec!["github:acme/rust-agent".to_string()],
+                    merged_from_item_ids: vec!["github:acme/rust-agent-duplicate".to_string()],
+                },
+                SourceQueryLineage {
+                    lineage_id: "lin-gh-2".to_string(),
+                    source_item_id: "github:acme/rust-agent".to_string(),
+                    chapter_id: Some("ch-2".to_string()),
+                    source_kind: Some(crate::model::SourceKind::GitHub),
+                    query_attempt_ids: vec!["gh-2".to_string()],
+                    returned_item_ids: vec!["github:acme/rust-agent".to_string()],
+                    merged_from_item_ids: Vec::new(),
+                },
+            ],
+        )
+        .expect("evidence memory should build");
+
+        let lineage = result
+            .memory
+            .source_lineage
+            .iter()
+            .find(|lineage| lineage.source_item_id == "github:acme/rust-agent")
+            .expect("lineage should be preserved");
+
+        assert_eq!(lineage.chapter_id.as_deref(), Some("ch-1"));
+        assert_eq!(lineage.source_kind, Some(crate::model::SourceKind::GitHub));
+        assert_eq!(
+            lineage.query_attempt_ids,
+            vec!["gh-1".to_string(), "gh-2".to_string()]
+        );
+        assert_eq!(
+            lineage.returned_item_ids,
+            vec!["github:acme/rust-agent".to_string()]
+        );
+        assert_eq!(
+            lineage.merged_from_item_ids,
+            vec!["github:acme/rust-agent-duplicate".to_string()]
+        );
+    }
+
+    #[test]
     fn evidence_note_truncation_is_character_safe() {
         let text = "字".repeat(151);
 
@@ -245,6 +354,28 @@ mod tests {
 
         assert_eq!(note.chars().count(), 153);
         assert!(note.ends_with("..."));
+    }
+
+    #[test]
+    fn extra_source_without_lineage_stays_outside_evidence_memory() {
+        let query = SearchQuery {
+            topic: "rust agent".to_string(),
+            github_limit: 10,
+            arxiv_limit: 10,
+        };
+        let result = build_evidence_memory(
+            &query,
+            &test_config(),
+            Vec::new(),
+            Vec::new(),
+            vec![academic_item()],
+            vec![sample_attempt("ss-1", "ch-1")],
+            Vec::new(),
+        )
+        .expect("evidence memory should build");
+
+        assert!(result.memory.items.is_empty());
+        assert_eq!(result.ranked_items.len(), 1);
     }
 
     fn sample_repo() -> GitHubRepo {
@@ -273,13 +404,45 @@ mod tests {
             started_at: dt(),
             finished_at: Some(dt()),
             result_count: 1,
+            source_kind: Some(crate::model::SourceKind::GitHub),
+            http_status: None,
+            rate_limit_info: None,
+            parser_error: None,
+            is_citeable: true,
             error: None,
+        }
+    }
+
+    fn academic_item() -> crate::model::SourceItem {
+        crate::model::SourceItem {
+            id: "semantic_scholar:abc123".to_string(),
+            kind: crate::model::SourceKind::AcademicIndex,
+            title: "Tool Calling Agents in Rust".to_string(),
+            url: "https://www.semanticscholar.org/paper/abc123".to_string(),
+            summary: "A paper about tool-calling agents.".to_string(),
+            evidence_snippet: "A paper about tool-calling agents.".to_string(),
+            tags: vec!["Computer Science".to_string()],
+            score: 0.0,
+            score_reasons: Vec::new(),
+            classification_reasons: Vec::new(),
+            score_breakdown: Default::default(),
+            published_or_updated_at: None,
+            metadata: crate::model::SourceMetadata::AcademicIndex {
+                authors: vec!["Ada Lovelace".to_string()],
+                venue: Some("TestConf".to_string()),
+                year: Some(2026),
+                doi: None,
+                citation_count: Some(5),
+                native_id: "abc123".to_string(),
+                source_name: "semantic_scholar".to_string(),
+            },
         }
     }
 
     fn test_config() -> AppConfig {
         AppConfig {
             github_token: Some("token".to_string()),
+            semantic_scholar_api_key: None,
             output: std::env::temp_dir(),
             cache_dir: std::env::temp_dir(),
             session_dir: std::env::temp_dir(),

@@ -48,6 +48,8 @@ function AgentControlPanel({
       max_aspects_per_round: clamp(maxAspects, 1, 3),
       github_budget: clamp(githubBudget, 1, 50),
       arxiv_budget: clamp(arxivBudget, 1, 50),
+      academic_extra_enabled: false,
+      academic_budget: 10,
       auto_approve_plan: false,
       allow_github_enrich: true,
       require_citation_audit: true,

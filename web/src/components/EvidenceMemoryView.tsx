@@ -177,7 +177,20 @@ function EvidenceCard({
 }
 
 function sourceLabel(kind: EvidenceItem["source_kind"]) {
-  return String(kind).toLowerCase() === "github" ? "GitHub" : "arXiv";
+  switch (String(kind).toLowerCase()) {
+    case "github":
+    case "git_hub":
+      return "GitHub";
+    case "arxiv":
+      return "arXiv";
+    case "academic_index":
+    case "academicindex":
+      return "Academic Index";
+    case "bibliography":
+      return "Bibliography";
+    default:
+      return String(kind);
+  }
 }
 
 export default EvidenceMemoryView;

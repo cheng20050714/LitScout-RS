@@ -70,6 +70,29 @@ fn metadata_keyword_score(item: &SourceItem, terms: &[String]) -> f64 {
             authors: _,
             categories,
         } => categories.join(" "),
+        SourceMetadata::AcademicIndex {
+            authors,
+            venue,
+            year,
+            doi,
+            source_name,
+            ..
+        }
+        | SourceMetadata::Bibliography {
+            authors,
+            venue,
+            year,
+            doi,
+            source_name,
+            ..
+        } => format!(
+            "{} {} {} {} {}",
+            authors.join(" "),
+            venue.as_deref().unwrap_or_default(),
+            year.map(|year| year.to_string()).unwrap_or_default(),
+            doi.as_deref().unwrap_or_default(),
+            source_name
+        ),
     };
     keyword_hits(&metadata_text, terms) as f64
 }
@@ -78,6 +101,10 @@ fn popularity_score(item: &SourceItem) -> f64 {
     match &item.metadata {
         SourceMetadata::GitHub { stars, .. } => ((*stars as f64) + 1.0).ln() * 1.5,
         SourceMetadata::Arxiv { .. } => 0.0,
+        SourceMetadata::AcademicIndex { citation_count, .. } => citation_count
+            .map(|count| ((count as f64) + 1.0).ln().min(4.0))
+            .unwrap_or(0.0),
+        SourceMetadata::Bibliography { .. } => 0.0,
     }
 }
 
@@ -99,6 +126,8 @@ fn recency_score(date: Option<DateTime<Utc>>, now: DateTime<Utc>, kind: SourceKi
     match kind {
         SourceKind::GitHub => base * 0.8,
         SourceKind::Arxiv => base,
+        SourceKind::AcademicIndex => base * 0.8,
+        SourceKind::Bibliography => base * 0.4,
     }
 }
 
@@ -128,6 +157,32 @@ fn source_bonus(item: &SourceItem) -> f64 {
             } else {
                 0.0
             }
+        }
+        SourceMetadata::AcademicIndex { venue, doi, .. } => {
+            let mut bonus = 0.8;
+            if venue
+                .as_deref()
+                .is_some_and(|venue| !venue.trim().is_empty())
+            {
+                bonus += 0.4;
+            }
+            if doi.as_deref().is_some_and(|doi| !doi.trim().is_empty()) {
+                bonus += 0.4;
+            }
+            bonus
+        }
+        SourceMetadata::Bibliography { venue, doi, .. } => {
+            let mut bonus = 0.3;
+            if venue
+                .as_deref()
+                .is_some_and(|venue| !venue.trim().is_empty())
+            {
+                bonus += 0.2;
+            }
+            if doi.as_deref().is_some_and(|doi| !doi.trim().is_empty()) {
+                bonus += 0.3;
+            }
+            bonus
         }
     }
 }
@@ -166,7 +221,7 @@ mod tests {
     use chrono::{DateTime, Utc};
 
     use super::{rank_items, score_item};
-    use crate::model::{GitHubRepo, SearchQuery, SourceItem};
+    use crate::model::{GitHubRepo, SearchQuery, SourceItem, SourceKind, SourceMetadata};
 
     fn dt(value: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(value)
@@ -223,5 +278,79 @@ mod tests {
 
         assert_eq!(ranked[0].id, "github:a/repo");
         assert_eq!(ranked[1].id, "github:b/repo");
+    }
+
+    #[test]
+    fn weak_bibliography_record_does_not_outrank_relevant_repository() {
+        let query = SearchQuery {
+            topic: "rust agent".to_string(),
+            github_limit: 10,
+            arxiv_limit: 10,
+        };
+        let repo = repo("acme/rust-agent", 20, "Rust agent framework");
+        let dblp = SourceItem {
+            id: "dblp:conf/test/weak".to_string(),
+            kind: SourceKind::Bibliography,
+            title: "Unrelated Systems Paper".to_string(),
+            url: "https://dblp.org/rec/conf/test/weak".to_string(),
+            summary: "Bibliographic metadata: Unknown authors. TestConf, 2020.".to_string(),
+            evidence_snippet: "Bibliographic metadata: Unknown authors. TestConf, 2020."
+                .to_string(),
+            tags: vec!["TestConf".to_string()],
+            score: 0.0,
+            score_reasons: Vec::new(),
+            classification_reasons: Vec::new(),
+            score_breakdown: Default::default(),
+            published_or_updated_at: None,
+            metadata: SourceMetadata::Bibliography {
+                authors: Vec::new(),
+                venue: Some("TestConf".to_string()),
+                year: Some(2020),
+                doi: Some("10.0000/weak".to_string()),
+                citation_count: None,
+                native_id: "conf/test/weak".to_string(),
+                source_name: "dblp".to_string(),
+            },
+        };
+
+        let ranked = rank_items(&query, vec![dblp, repo]);
+
+        assert_eq!(ranked[0].id, "github:acme/rust-agent");
+    }
+
+    #[test]
+    fn semantic_scholar_citation_signal_is_capped() {
+        let query = SearchQuery {
+            topic: "agent".to_string(),
+            github_limit: 10,
+            arxiv_limit: 10,
+        };
+        let mut item = SourceItem {
+            id: "semantic_scholar:highly-cited".to_string(),
+            kind: SourceKind::AcademicIndex,
+            title: "Agent Systems".to_string(),
+            url: "https://www.semanticscholar.org/paper/highly-cited".to_string(),
+            summary: "Agent systems.".to_string(),
+            evidence_snippet: "Agent systems.".to_string(),
+            tags: vec!["Computer Science".to_string()],
+            score: 0.0,
+            score_reasons: Vec::new(),
+            classification_reasons: Vec::new(),
+            score_breakdown: Default::default(),
+            published_or_updated_at: None,
+            metadata: SourceMetadata::AcademicIndex {
+                authors: vec!["Ada Lovelace".to_string()],
+                venue: Some("TestConf".to_string()),
+                year: Some(2025),
+                doi: None,
+                citation_count: Some(1_000_000),
+                native_id: "highly-cited".to_string(),
+                source_name: "semantic_scholar".to_string(),
+            },
+        };
+
+        score_item(&mut item, &query, dt("2026-05-30T00:00:00Z"));
+
+        assert_eq!(item.score_breakdown.popularity_score, 4.0);
     }
 }
