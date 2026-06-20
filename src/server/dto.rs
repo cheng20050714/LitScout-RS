@@ -75,19 +75,6 @@ pub struct CheckpointListResponse {
     pub checkpoints: Vec<Checkpoint>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct ReportChatRequest {
-    pub question: String,
-    pub report_markdown: String,
-    #[serde(default)]
-    pub config: FrontendConfig,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ReportChatResponse {
-    pub answer: String,
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct ReadingLibraryResponse {
     pub items: Vec<crate::reading::models::ReadingLibrarySummary>,
@@ -145,4 +132,6 @@ pub struct FrontendConfig {
     pub deepseek_side_model: Option<String>,
     pub github_token: Option<String>,
     pub semantic_scholar_api_key: Option<String>,
+    pub openalex_api_key: Option<String>,
+    pub crossref_mailto: Option<String>,
 }

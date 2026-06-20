@@ -1,0 +1,51 @@
+{
+  "results": [
+    {
+      "id": "https://openalex.org/W1234567890",
+      "doi": "https://doi.org/10.1234/tool-agent",
+      "title": "Tool Calling Agents in Rust",
+      "display_name": "Tool Calling Agents in Rust",
+      "authorships": [
+        { "author": { "display_name": "Ada Lovelace" } },
+        { "author": { "display_name": "Grace Hopper" } }
+      ],
+      "primary_location": {
+        "landing_page_url": "https://doi.org/10.1234/tool-agent",
+        "source": { "display_name": "Test Conference" }
+      },
+      "publication_year": 2026,
+      "cited_by_count": 128,
+      "concepts": [
+        { "display_name": "Computer science" },
+        { "display_name": "Software engineering" }
+      ],
+      "abstract_inverted_index": {
+        "This": [0],
+        "paper": [1],
+        "studies": [2],
+        "tool": [3],
+        "calling": [4],
+        "agents": [5],
+        "in": [6],
+        "Rust": [7]
+      }
+    },
+    {
+      "id": "https://openalex.org/W2222222222",
+      "doi": null,
+      "display_name": "Metadata Merging for Research Scouts",
+      "authorships": [
+        { "author": { "display_name": "Alan Turing" } }
+      ],
+      "primary_location": {
+        "landing_page_url": "https://openalex.org/W2222222222",
+        "source": { "display_name": "Open Metadata Journal" }
+      },
+      "publication_year": 2025,
+      "cited_by_count": 12,
+      "concepts": [
+        { "display_name": "Information retrieval" }
+      ]
+    }
+  ]
+}

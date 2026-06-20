@@ -30,12 +30,12 @@ import type {
 } from "./api/types";
 import AgentControlPanel from "./components/AgentControlPanel";
 import CitationAuditView from "./components/CitationAuditView";
+import ConfigHalftoneVisual from "./components/ConfigHalftoneVisual";
 import ConfigPanel from "./components/ConfigPanel";
 import CoverageMatrix from "./components/CoverageMatrix";
 import EvidenceMemoryView from "./components/EvidenceMemoryView";
 import PlanTree from "./components/PlanTree";
 import ReadingLibraryView from "./components/ReadingLibraryView";
-import ReportChat from "./components/ReportChat";
 import ReportView from "./components/ReportView";
 import RunTimeline from "./components/RunTimeline";
 
@@ -263,6 +263,8 @@ ${chapters}
                 updated_at: item.updated_at,
                 status: item.status,
                 text_coverage: item.text_coverage,
+                text_meta: item.text_meta,
+                note_quality: item.note_quality,
                 has_note: Boolean(item.note),
                 error: item.error
               }
@@ -303,7 +305,15 @@ ${chapters}
   }
 
   return (
-    <main className={stage === "config" ? "app-shell config-only" : "app-shell"}>
+    <main
+      className={
+        stage === "config"
+          ? "app-shell config-only"
+          : stage === "library"
+            ? "app-shell library-mode"
+            : "app-shell"
+      }
+    >
       {/* Rail navigation */}
       <aside className="rail" aria-label="阶段导航">
         <div className="brand-mark">LS</div>
@@ -333,54 +343,47 @@ ${chapters}
         </button>
       </aside>
 
-      {/* Left pane: config or agent control */}
-      <section className="pane command-pane" aria-label="配置和输入">
-        <div className="brand-row">
-          <div>
-            <p className="eyebrow">LitScout-RS</p>
-            <h1>{stage === "config" ? "连接配置" : stage === "library" ? "论文阅读" : "文献调研"}</h1>
-          </div>
-          <span className={`status-dot ${health?.status === "ok" ? "ok" : ""}`} />
-        </div>
-
-        {stage === "config" ? (
-          <ConfigPanel config={config} health={health} onSave={handleConfigSaved} onNotice={setNotice} />
-        ) : stage === "research" ? (
-          <AgentControlPanel
-            config={config}
-            hasServerLlm={Boolean(health?.llm_enabled)}
-            onRunCreated={handleRunCreated}
-            onNotice={setNotice}
-            onActivityChange={(nextActivity) => {
-              setActivity(nextActivity);
-              if (nextActivity === "planning") {
-                setProgress(32);
-                setProgressLabel("正在生成调研摘要与章节计划");
-              }
-            }}
-          />
-        ) : (
-          <div className="status-stack">
-            <div className="phase-card">
-              <p className="eyebrow">Reading Library</p>
-              <h2>论文深读工作台</h2>
-              <p className="muted">从证据页加入 arXiv 论文后，在这里生成阅读笔记并围绕单篇论文追问。</p>
+      {stage !== "library" && (
+        <section className="pane command-pane" aria-label="配置和输入">
+          <div className="brand-row">
+            <div>
+              <p className="eyebrow">LitScout-RS</p>
+              <h1>{stage === "config" ? "连接配置" : "文献调研"}</h1>
             </div>
-            <dl className="status-list">
-              <div><dt>论文</dt><dd>{libraryItems.length}</dd></div>
-              <div><dt>已完成</dt><dd>{libraryItems.filter((item) => item.status === "ready").length}</dd></div>
-              <div><dt>失败</dt><dd>{libraryItems.filter((item) => item.status === "failed").length}</dd></div>
-              <div><dt>模型</dt><dd>{health?.llm_enabled ? "后端已启用" : "本页配置"}</dd></div>
-            </dl>
+            <span className={`status-dot ${health?.status === "ok" ? "ok" : ""}`} />
           </div>
-        )}
 
-        {notice && (
-          <div className="notice-box error-tone" role="alert" style={{ marginTop: 16 }}>
-            {notice}
-          </div>
-        )}
-      </section>
+          {stage === "config" ? (
+            <ConfigPanel config={config} health={health} onSave={handleConfigSaved} onNotice={setNotice} />
+          ) : (
+            <AgentControlPanel
+              config={config}
+              hasServerLlm={Boolean(health?.llm_enabled)}
+              onRunCreated={handleRunCreated}
+              onNotice={setNotice}
+              onActivityChange={(nextActivity) => {
+                setActivity(nextActivity);
+                if (nextActivity === "planning") {
+                  setProgress(32);
+                  setProgressLabel("正在生成调研摘要与章节计划");
+                }
+              }}
+            />
+          )}
+
+          {notice && (
+            <div className="notice-box error-tone" role="alert" style={{ marginTop: 16 }}>
+              {notice}
+            </div>
+          )}
+        </section>
+      )}
+
+      {stage === "config" && (
+        <section className="pane config-visual-pane" aria-label="配置页视觉区域">
+          <ConfigHalftoneVisual />
+        </section>
+      )}
 
       {/* Right pane: workspace */}
       {stage === "research" && (
@@ -472,15 +475,17 @@ ${chapters}
           ) : activeView === "audit" ? (
             <CitationAuditView run={agentRun} audit={citationAudit} />
           ) : (
-            <div className="report-workspace">
-              <ReportView markdown={reportPreview} canTranslate={Boolean(reportMarkdown)} translating={translating} onTranslate={handleTranslateReport} />
-              <ReportChat config={config} reportMarkdown={reportMarkdown} disabled={!reportMarkdown} onNotice={setNotice} />
-            </div>
+            <ReportView markdown={reportPreview} canTranslate={Boolean(reportMarkdown)} translating={translating} onTranslate={handleTranslateReport} />
           )}
         </section>
       )}
       {stage === "library" && (
-        <section className="pane workspace-pane" aria-label="阅读库工作区">
+        <section className="pane workspace-pane library-workspace" aria-label="阅读库工作区">
+          {notice && (
+            <div className="notice-box error-tone library-notice" role="alert">
+              {notice}
+            </div>
+          )}
           <ReadingLibraryView
             config={config}
             items={libraryItems}

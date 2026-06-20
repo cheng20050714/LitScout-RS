@@ -12,6 +12,8 @@ pub const DEFAULT_LLM_TIMEOUT_SECS: u64 = 120;
 pub struct AppConfig {
     pub github_token: Option<String>,
     pub semantic_scholar_api_key: Option<String>,
+    pub openalex_api_key: Option<String>,
+    pub crossref_mailto: Option<String>,
     pub output: PathBuf,
     pub cache_dir: PathBuf,
     pub session_dir: PathBuf,
@@ -33,6 +35,8 @@ impl AppConfig {
         Ok(Self {
             github_token: cli.github_token.clone(),
             semantic_scholar_api_key: cli.semantic_scholar_api_key.clone(),
+            openalex_api_key: cli.openalex_api_key.clone(),
+            crossref_mailto: cli.crossref_mailto.clone(),
             output: cli.output.clone(),
             cache_dir: cli.cache_dir.clone(),
             session_dir: cli.session_dir.clone(),
@@ -170,6 +174,27 @@ mod tests {
 
         let err = AppConfig::from_cli(&cli).expect_err("zero limits must be rejected");
         assert!(err.to_string().contains("must be greater than 0"));
+    }
+
+    #[test]
+    fn app_config_reads_stage_a_closure_keys_from_cli() {
+        let cli = Cli::try_parse_from([
+            "litscout-rs",
+            "rust agent",
+            "--openalex-api-key",
+            "oa-test",
+            "--crossref-mailto",
+            "research@example.test",
+        ])
+        .expect("CLI should parse academic source config");
+
+        let config = AppConfig::from_cli(&cli).expect("config should build");
+
+        assert_eq!(config.openalex_api_key.as_deref(), Some("oa-test"));
+        assert_eq!(
+            config.crossref_mailto.as_deref(),
+            Some("research@example.test")
+        );
     }
 
     #[test]

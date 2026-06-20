@@ -756,20 +756,15 @@ async fn trace_planned_tool_calls(
         }
         if include_academic_extra {
             for query in academic_queries_for_trace(item) {
-                trace
-                    .append(&TraceEvent::ToolCallStarted {
-                        tool: "semantic_scholar".to_string(),
-                        query: query.clone(),
-                        at: Utc::now(),
-                    })
-                    .await?;
-                trace
-                    .append(&TraceEvent::ToolCallStarted {
-                        tool: "dblp".to_string(),
-                        query,
-                        at: Utc::now(),
-                    })
-                    .await?;
+                for source in academic_scout::academic_source_names() {
+                    trace
+                        .append(&TraceEvent::ToolCallStarted {
+                            tool: source.to_string(),
+                            query: query.clone(),
+                            at: Utc::now(),
+                        })
+                        .await?;
+                }
             }
         }
     }
@@ -909,6 +904,8 @@ mod tests {
         let app_config = AppConfig {
             github_token: None,
             semantic_scholar_api_key: None,
+            openalex_api_key: None,
+            crossref_mailto: None,
             output: root.join("reports"),
             cache_dir: root.join("cache"),
             session_dir: root.join("sessions"),

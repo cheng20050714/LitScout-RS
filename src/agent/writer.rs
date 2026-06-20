@@ -13,10 +13,25 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use tracing::{debug, warn};
 
-const MAX_EVIDENCE_PER_BATCH: usize = 4;
-const MAX_BATCH_CONTEXT_CHARS: usize = 10_000;
-const MAX_BATCH_PARAGRAPHS: usize = 4;
-const MAX_CHAPTER_PARAGRAPHS: usize = 6;
+const MAX_EVIDENCE_PER_BATCH: usize = 3;
+const MAX_BATCH_CONTEXT_CHARS: usize = 3_500;
+const MAX_BATCH_PARAGRAPHS: usize = 1;
+const MAX_CHAPTER_PARAGRAPHS: usize = 4;
+const MAX_WRITER_EVIDENCE_PER_CHAPTER: usize = 8;
+const WRITER_GITHUB_EVIDENCE_CAP: usize = 4;
+const WRITER_ARXIV_EVIDENCE_CAP: usize = 4;
+const WRITER_ACADEMIC_INDEX_EVIDENCE_CAP: usize = 3;
+const WRITER_BIBLIOGRAPHY_EVIDENCE_CAP: usize = 1;
+const BATCH_FINDINGS_TARGET_CHARS: usize = 180;
+const BATCH_PARAGRAPH_TARGET_CHARS: usize = 220;
+const CHAPTER_PARAGRAPH_TARGET_CHARS: usize = 260;
+const GLOBAL_SUMMARY_TARGET_CHARS: usize = 420;
+const WRITER_TITLE_MAX_CHARS: usize = 180;
+const WRITER_EVIDENCE_NOTE_MAX_CHARS: usize = 220;
+const WRITER_GITHUB_SNIPPET_MAX_CHARS: usize = 900;
+const WRITER_ACADEMIC_SNIPPET_MAX_CHARS: usize = 700;
+const WRITER_BIBLIOGRAPHY_SNIPPET_MAX_CHARS: usize = 200;
+const REPAIR_PREVIOUS_OUTPUT_MAX_CHARS: usize = 2_400;
 const WRITER_MIN_OUTPUT_TOKENS: usize = 4096;
 const WRITER_MAX_OUTPUT_TOKENS: usize = 8192;
 
@@ -81,9 +96,12 @@ async fn draft_chapter_with_llm(
     client: &DeepSeekClient,
     config: &DeepSeekConfig,
 ) -> Result<ChapterDraft> {
-    let batches = batch_chapter_evidence(evidence_items);
+    let selected_evidence = select_evidence_for_writing(evidence_items);
+    let batches = batch_chapter_evidence(&selected_evidence);
     debug!(
-        "Writer split chapter `{}` into {} evidence batches",
+        "Writer selected {}/{} evidence items and split chapter `{}` into {} evidence batches",
+        selected_evidence.len(),
+        evidence_items.len(),
         chapter.title_zh,
         batches.len()
     );
@@ -94,7 +112,8 @@ async fn draft_chapter_with_llm(
         batch_drafts.push(draft);
     }
 
-    synthesize_chapter_from_batches(chapter, evidence_items, &batch_drafts, client, config).await
+    synthesize_chapter_from_batches(chapter, &selected_evidence, &batch_drafts, client, config)
+        .await
 }
 
 fn empty_chapter_draft(chapter: &ChapterNode) -> ChapterDraft {
@@ -161,12 +180,68 @@ fn batch_chapter_evidence(evidence_items: &[EvidenceItem]) -> Vec<EvidenceBatch>
     batches
 }
 
+fn select_evidence_for_writing(evidence_items: &[EvidenceItem]) -> Vec<EvidenceItem> {
+    let mut selected = Vec::new();
+    let has_stronger_sources = evidence_items
+        .iter()
+        .any(|item| item.source_kind != SourceKind::Bibliography);
+
+    append_evidence_by_kind(
+        evidence_items,
+        &mut selected,
+        SourceKind::Arxiv,
+        WRITER_ARXIV_EVIDENCE_CAP,
+    );
+    append_evidence_by_kind(
+        evidence_items,
+        &mut selected,
+        SourceKind::AcademicIndex,
+        WRITER_ACADEMIC_INDEX_EVIDENCE_CAP,
+    );
+    append_evidence_by_kind(
+        evidence_items,
+        &mut selected,
+        SourceKind::GitHub,
+        WRITER_GITHUB_EVIDENCE_CAP,
+    );
+    if !has_stronger_sources {
+        append_evidence_by_kind(
+            evidence_items,
+            &mut selected,
+            SourceKind::Bibliography,
+            WRITER_BIBLIOGRAPHY_EVIDENCE_CAP,
+        );
+    }
+
+    selected
+}
+
+fn append_evidence_by_kind(
+    evidence_items: &[EvidenceItem],
+    selected: &mut Vec<EvidenceItem>,
+    source_kind: SourceKind,
+    source_cap: usize,
+) {
+    let mut source_count = 0usize;
+    for item in evidence_items
+        .iter()
+        .filter(|item| item.source_kind == source_kind)
+    {
+        if selected.len() >= MAX_WRITER_EVIDENCE_PER_CHAPTER || source_count >= source_cap {
+            break;
+        }
+        selected.push(item.clone());
+        source_count += 1;
+    }
+}
+
 fn evidence_context_chars(item: &EvidenceItem) -> usize {
-    item.evidence_id.chars().count()
-        + item.title.chars().count()
-        + item.url.chars().count()
-        + item.evidence_note_zh.chars().count()
-        + item.evidence_snippet.chars().count()
+    let input = EvidenceSourceInput::from(item);
+    input.evidence_id.chars().count()
+        + input.title.chars().count()
+        + input.url.chars().count()
+        + input.evidence_note_zh.chars().count()
+        + input.evidence_snippet.chars().count()
 }
 
 fn excerpt_chars(text: &str, max_chars: usize) -> String {
@@ -307,6 +382,7 @@ fn build_batch_draft_repair_request(
     };
     let context_json = serde_json::to_string_pretty(&context)?;
     let max_tokens = writer_max_tokens(config);
+    let previous_excerpt = excerpt_chars(previous_output, REPAIR_PREVIOUS_OUTPUT_MAX_CHARS);
 
     Ok(ChatCompletionsRequest {
         model: config.main_model.clone(),
@@ -318,7 +394,7 @@ fn build_batch_draft_repair_request(
             ChatMessage {
                 role: "user".to_string(),
                 content: format!(
-                    "请修复上一次第 {}/{} 个证据批次的输出，使其满足 JSON schema 和引用约束。只返回修复后的 JSON 对象。\n\n校验错误：\n{validation_error}\n\n上一次输出：\n{previous_output}\n\n允许使用的 evidence：\n{context_json}",
+                    "请修复上一次第 {}/{} 个证据批次的输出，使其满足 JSON schema、引用约束和长度约束。只返回修复后的 JSON 对象。\n\n校验错误：\n{validation_error}\n\n上一次输出节选：\n{previous_excerpt}\n\n允许使用的 evidence：\n{context_json}",
                     batch.batch_id, total_batches
                 ),
             },
@@ -370,8 +446,8 @@ fn batch_writer_system_prompt(chapter_title: &str) -> String {
         "你是 LitScout-RS 的技术报告撰稿人，正在为 `{chapter_title}` 章节处理一个 evidence batch。\n\
 规则：\n\
 1. 使用中文撰写。\n\
-2. 先在 findings_summary_zh 中总结本批证据的关键发现、共性和边界。\n\
-3. 再对本批来源提炼项目/论文简介、核心亮点或设计思想，以及与章节问题的具体关联。\n\
+2. findings_summary_zh 不超过 {BATCH_FINDINGS_TARGET_CHARS} 个汉字，只总结本批证据的关键发现、共性和边界。\n\
+3. paragraphs 输出 1-{MAX_BATCH_PARAGRAPHS} 段，每段不超过 {BATCH_PARAGRAPH_TARGET_CHARS} 个汉字；提炼项目/论文简介、核心亮点或设计思想，以及与章节问题的具体关联。\n\
 4. 可合并多个来源做对比分析，但每个段落必须引用至少一个 evidence_id。\n\
 5. 只能使用用户提供的 evidence_id 和 URL，不得新增来源、不得编造事实。\n\
 6. 不要只重复原文，不要输出“来源链接”模板句。\n\
@@ -447,6 +523,7 @@ fn build_chapter_synthesis_repair_request(
     };
     let context_json = serde_json::to_string_pretty(&context)?;
     let max_tokens = writer_max_tokens(config);
+    let previous_excerpt = excerpt_chars(previous_output, REPAIR_PREVIOUS_OUTPUT_MAX_CHARS);
 
     Ok(ChatCompletionsRequest {
         model: config.main_model.clone(),
@@ -458,7 +535,7 @@ fn build_chapter_synthesis_repair_request(
             ChatMessage {
                 role: "user".to_string(),
                 content: format!(
-                    "请修复上一次章节综合输出，使其满足 JSON schema 和引用约束。只返回修复后的 JSON 对象。\n\n校验错误：\n{validation_error}\n\n上一次输出：\n{previous_output}\n\n允许使用的 batch findings：\n{context_json}"
+                    "请修复上一次章节综合输出，使其满足 JSON schema、引用约束和长度约束。只返回修复后的 JSON 对象。\n\n校验错误：\n{validation_error}\n\n上一次输出节选：\n{previous_excerpt}\n\n允许使用的 batch findings：\n{context_json}",
                 ),
             },
         ],
@@ -481,8 +558,9 @@ fn chapter_synthesizer_system_prompt(chapter_title: &str) -> String {
 4. 已有 evidence 时，不得用“尚未收集到足够证据”替代分析内容。\n\
 5. 每个段落必须引用至少一个 allowed_evidence_ids 中的 evidence_id。\n\
 6. 不得新增来源、URL 或 evidence_id，不得编造事实。\n\
-7. 不要输出“来源链接”模板句或“是本章节的关键来源之一”。\n\
-8. 只返回 JSON：{{\"paragraphs\":[{{\"text_zh\":\"...\",\"cited_evidence_ids\":[\"ev-C1\"]}}]}}。"
+7. 输出 1-{MAX_CHAPTER_PARAGRAPHS} 段，每段不超过 {CHAPTER_PARAGRAPH_TARGET_CHARS} 个汉字。\n\
+8. 不要输出“来源链接”模板句或“是本章节的关键来源之一”。\n\
+9. 只返回 JSON：{{\"paragraphs\":[{{\"text_zh\":\"...\",\"cited_evidence_ids\":[\"ev-C1\"]}}]}}。"
     )
 }
 
@@ -562,6 +640,7 @@ fn build_global_summary_repair_request(
     let context = GlobalSummaryInput::from_report(topic, chapter_drafts, evidence_count);
     let context_json = serde_json::to_string_pretty(&context)?;
     let max_tokens = writer_max_tokens(config);
+    let previous_excerpt = excerpt_chars(previous_output, REPAIR_PREVIOUS_OUTPUT_MAX_CHARS);
 
     Ok(ChatCompletionsRequest {
         model: config.main_model.clone(),
@@ -573,7 +652,7 @@ fn build_global_summary_repair_request(
             ChatMessage {
                 role: "user".to_string(),
                 content: format!(
-                    "请修复上一次全局摘要输出，使其满足 JSON schema 和写作约束。只返回修复后的 JSON 对象。\n\n校验错误：\n{validation_error}\n\n上一次输出：\n{previous_output}\n\n章节终稿上下文：\n{context_json}"
+                    "请修复上一次全局摘要输出，使其满足 JSON schema 和写作约束。只返回修复后的 JSON 对象。\n\n校验错误：\n{validation_error}\n\n上一次输出节选：\n{previous_excerpt}\n\n章节终稿上下文：\n{context_json}",
                 ),
             },
         ],
@@ -605,15 +684,16 @@ fn parse_global_summary_content(content: &str) -> Result<String> {
 }
 
 fn global_synthesizer_system_prompt() -> String {
-    "你是 LitScout-RS 的报告总编辑，负责基于章节终稿生成全局摘要。\n\
+    format!(
+        "你是 LitScout-RS 的报告总编辑，负责基于章节终稿生成全局摘要。\n\
 规则：\n\
-1. 使用中文撰写 1-2 段自然的全局摘要。\n\
+1. 使用中文撰写 1-2 段自然的全局摘要，总长度不超过 {GLOBAL_SUMMARY_TARGET_CHARS} 个汉字。\n\
 2. 概括报告覆盖范围、主要发现、证据边界和不足。\n\
 3. 只能使用用户提供的章节终稿和 citation id，不得新增来源、URL 或事实。\n\
 4. 不要输出固定模板句，不要写“来源链接”，不要写“是本章节的关键来源之一”。\n\
 5. 不要把引用账本逐条改写成摘要。\n\
-6. 只返回 JSON：{\"global_summary_zh\":\"...\"}。"
-        .to_string()
+6. 只返回 JSON：{{\"global_summary_zh\":\"...\"}}。"
+    )
 }
 
 fn parse_chapter_draft_content(
@@ -830,12 +910,23 @@ impl From<&EvidenceItem> for EvidenceSourceInput {
     fn from(item: &EvidenceItem) -> Self {
         Self {
             evidence_id: item.evidence_id.clone(),
-            title: item.title.clone(),
+            title: excerpt_chars(&item.title, WRITER_TITLE_MAX_CHARS),
             url: item.url.clone(),
             source_kind: item.source_kind,
-            evidence_note_zh: item.evidence_note_zh.clone(),
-            evidence_snippet: item.evidence_snippet.clone(),
+            evidence_note_zh: excerpt_chars(&item.evidence_note_zh, WRITER_EVIDENCE_NOTE_MAX_CHARS),
+            evidence_snippet: excerpt_chars(
+                &item.evidence_snippet,
+                writer_snippet_max_chars(item.source_kind),
+            ),
         }
+    }
+}
+
+fn writer_snippet_max_chars(source_kind: SourceKind) -> usize {
+    match source_kind {
+        SourceKind::GitHub => WRITER_GITHUB_SNIPPET_MAX_CHARS,
+        SourceKind::Arxiv | SourceKind::AcademicIndex => WRITER_ACADEMIC_SNIPPET_MAX_CHARS,
+        SourceKind::Bibliography => WRITER_BIBLIOGRAPHY_SNIPPET_MAX_CHARS,
     }
 }
 
@@ -879,7 +970,8 @@ mod tests {
         batch_chapter_evidence, build_batch_draft_request, build_chapter_synthesis_request,
         build_global_summary_request, draft_report_with_llm, empty_chapter_draft,
         parse_batch_draft_content, parse_chapter_draft_content, parse_global_summary_content,
-        writer_max_tokens, BatchDraft, MAX_BATCH_CONTEXT_CHARS, MAX_EVIDENCE_PER_BATCH,
+        select_evidence_for_writing, writer_max_tokens, BatchDraft, MAX_BATCH_CONTEXT_CHARS,
+        MAX_EVIDENCE_PER_BATCH, MAX_WRITER_EVIDENCE_PER_CHAPTER, WRITER_BIBLIOGRAPHY_EVIDENCE_CAP,
         WRITER_MIN_OUTPUT_TOKENS,
     };
 
@@ -1035,6 +1127,49 @@ mod tests {
     }
 
     #[test]
+    fn selects_bounded_mixed_evidence_for_writing() {
+        let mut evidence = Vec::new();
+        evidence.extend((1..=5).map(|index| {
+            sample_evidence_with_kind(&format!("ev-A{index}"), "ch-1", SourceKind::Arxiv)
+        }));
+        evidence.extend((1..=4).map(|index| {
+            sample_evidence_with_kind(&format!("ev-S{index}"), "ch-1", SourceKind::AcademicIndex)
+        }));
+        evidence.extend((1..=4).map(|index| {
+            sample_evidence_with_kind(&format!("ev-G{index}"), "ch-1", SourceKind::GitHub)
+        }));
+        evidence.extend((1..=2).map(|index| {
+            sample_evidence_with_kind(&format!("ev-B{index}"), "ch-1", SourceKind::Bibliography)
+        }));
+
+        let selected = select_evidence_for_writing(&evidence);
+        let bibliography_count = selected
+            .iter()
+            .filter(|item| item.source_kind == SourceKind::Bibliography)
+            .count();
+
+        assert_eq!(selected.len(), MAX_WRITER_EVIDENCE_PER_CHAPTER);
+        assert_eq!(bibliography_count, 0);
+        assert_eq!(selected[0].source_kind, SourceKind::Arxiv);
+        assert_eq!(selected[4].source_kind, SourceKind::AcademicIndex);
+        assert_eq!(selected[7].source_kind, SourceKind::GitHub);
+    }
+
+    #[test]
+    fn selects_bibliography_only_when_no_stronger_sources_exist() {
+        let evidence = (1..=3)
+            .map(|index| {
+                sample_evidence_with_kind(&format!("ev-B{index}"), "ch-1", SourceKind::Bibliography)
+            })
+            .collect::<Vec<_>>();
+
+        let selected = select_evidence_for_writing(&evidence);
+
+        assert_eq!(selected.len(), WRITER_BIBLIOGRAPHY_EVIDENCE_CAP);
+        assert_eq!(selected[0].source_kind, SourceKind::Bibliography);
+    }
+
+    #[test]
     fn batches_chapter_evidence_by_count() {
         let evidence = (1..=9)
             .map(|index| sample_evidence(&format!("ev-C{index}"), "ch-1"))
@@ -1045,23 +1180,47 @@ mod tests {
         assert_eq!(batches.len(), 3);
         assert_eq!(batches[0].evidence_items.len(), MAX_EVIDENCE_PER_BATCH);
         assert_eq!(batches[1].evidence_items.len(), MAX_EVIDENCE_PER_BATCH);
-        assert_eq!(batches[2].evidence_items.len(), 1);
+        assert_eq!(batches[2].evidence_items.len(), MAX_EVIDENCE_PER_BATCH);
         assert_eq!(batches[2].batch_id, 3);
     }
 
     #[test]
-    fn batches_chapter_evidence_by_context_chars() {
+    fn batches_chapter_evidence_by_sanitized_context_chars() {
         let mut first = sample_evidence("ev-C1", "ch-1");
-        first.evidence_snippet = "a".repeat(MAX_BATCH_CONTEXT_CHARS / 2 + 200);
+        first.evidence_snippet = "a".repeat(MAX_BATCH_CONTEXT_CHARS);
         let mut second = sample_evidence("ev-C2", "ch-1");
-        second.evidence_snippet = "b".repeat(MAX_BATCH_CONTEXT_CHARS / 2 + 200);
+        second.evidence_snippet = "b".repeat(MAX_BATCH_CONTEXT_CHARS);
+        let mut third = sample_evidence("ev-C3", "ch-1");
+        third.evidence_snippet = "c".repeat(MAX_BATCH_CONTEXT_CHARS);
+        let mut fourth = sample_evidence("ev-C4", "ch-1");
+        fourth.evidence_snippet = "d".repeat(MAX_BATCH_CONTEXT_CHARS);
 
-        let batches = batch_chapter_evidence(&[first, second]);
+        let batches = batch_chapter_evidence(&[first, second, third, fourth]);
 
         assert_eq!(batches.len(), 2);
-        assert_eq!(batches[0].evidence_items[0].evidence_id, "ev-C1");
-        assert_eq!(batches[1].evidence_items[0].evidence_id, "ev-C2");
-        assert!(batches[0].context_chars > MAX_BATCH_CONTEXT_CHARS / 2);
+        assert_eq!(batches[0].evidence_items.len(), 3);
+        assert_eq!(batches[1].evidence_items.len(), 1);
+        assert!(batches[0].context_chars <= MAX_BATCH_CONTEXT_CHARS);
+    }
+
+    #[test]
+    fn batch_request_truncates_long_github_snippets_for_writer_context() {
+        let chapter = sample_chapter();
+        let mut evidence = sample_evidence("ev-C1", "ch-1");
+        evidence.evidence_snippet = format!("{}{}", "A".repeat(1500), "UNTRUNCATED_TAIL");
+        let batches = batch_chapter_evidence(&[evidence]);
+
+        let request = build_batch_draft_request(
+            &chapter,
+            &batches[0],
+            batches.len(),
+            &sample_deepseek_config(4096),
+        )
+        .expect("request should build");
+        let user_message = &request.messages[1].content;
+
+        assert!(user_message.contains(&"A".repeat(900)));
+        assert!(!user_message.contains("UNTRUNCATED_TAIL"));
     }
 
     #[test]
@@ -1270,13 +1429,21 @@ mod tests {
     }
 
     fn sample_evidence(evidence_id: &str, chapter_id: &str) -> EvidenceItem {
+        sample_evidence_with_kind(evidence_id, chapter_id, SourceKind::GitHub)
+    }
+
+    fn sample_evidence_with_kind(
+        evidence_id: &str,
+        chapter_id: &str,
+        source_kind: SourceKind,
+    ) -> EvidenceItem {
         EvidenceItem {
             evidence_id: evidence_id.to_string(),
-            source_item_id: "github:acme/rust-agent".to_string(),
+            source_item_id: format!("{source_kind:?}:acme/rust-agent"),
             citation_id: "C1".to_string(),
             chapter_ids: vec![chapter_id.to_string()],
             query_attempt_ids: vec!["gh-1".to_string()],
-            source_kind: SourceKind::GitHub,
+            source_kind,
             title: "acme/rust-agent".to_string(),
             url: "https://github.com/acme/rust-agent".to_string(),
             evidence_note_zh: "GitHub 仓库 `acme/rust-agent`：Rust agent framework".to_string(),

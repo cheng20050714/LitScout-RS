@@ -66,7 +66,6 @@ fn reject_secret_markers(body: &str) -> Result<()> {
         "GITHUB_TOKEN",
         "deepseek-secret",
         "github-secret",
-        "sk-",
     ] {
         if body.contains(marker) {
             return Err(AppError::Workflow(format!(
@@ -74,7 +73,46 @@ fn reject_secret_markers(body: &str) -> Result<()> {
             )));
         }
     }
+    if contains_probable_secret_key(body) {
+        return Err(AppError::Workflow(
+            "checkpoint snapshot contains forbidden secret marker `sk-`".to_string(),
+        ));
+    }
     Ok(())
+}
+
+fn contains_probable_secret_key(body: &str) -> bool {
+    const SECRET_PREFIX: &str = "sk-";
+    const MIN_SECRET_SUFFIX_LEN: usize = 20;
+
+    let mut search_from = 0usize;
+    while let Some(relative_index) = body[search_from..].find(SECRET_PREFIX) {
+        let start = search_from + relative_index;
+        let prefix_boundary = start == 0
+            || body[..start]
+                .chars()
+                .next_back()
+                .is_none_or(|ch| !is_secret_token_char(ch));
+        if !prefix_boundary {
+            search_from = start + SECRET_PREFIX.len();
+            continue;
+        }
+
+        let suffix_len = body[start + SECRET_PREFIX.len()..]
+            .chars()
+            .take_while(|ch| is_secret_token_char(*ch))
+            .count();
+        if suffix_len >= MIN_SECRET_SUFFIX_LEN {
+            return true;
+        }
+        search_from = start + SECRET_PREFIX.len();
+    }
+
+    false
+}
+
+fn is_secret_token_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-')
 }
 
 trait StateName {
@@ -123,6 +161,46 @@ mod tests {
         assert!(!body.contains("deepseek-secret"));
         assert!(!body.contains("github-secret"));
         assert!(body.contains("run-1"));
+    }
+
+    #[tokio::test]
+    async fn checkpoint_allows_benign_sk_substrings_in_evidence_text() {
+        let run_dir = temp_dir("checkpoint-benign-sk");
+        let mut run = ResearchRunRecord::new(
+            "run-1".to_string(),
+            "task-oriented Mask-GCT research".to_string(),
+            RunPolicy::default(),
+        );
+        run.state = ResearchRunState::PlanReady;
+        run.warnings
+            .push("task-oriented and Mask-GCT are normal research terms".to_string());
+
+        write_checkpoint(&run_dir, &run)
+            .await
+            .expect("benign sk- substrings should not be treated as secrets");
+    }
+
+    #[tokio::test]
+    async fn checkpoint_rejects_probable_sk_secret_tokens() {
+        let run_dir = temp_dir("checkpoint-secret-token");
+        let mut run = ResearchRunRecord::new(
+            "run-1".to_string(),
+            "rust agent".to_string(),
+            RunPolicy::default(),
+        );
+        run.state = ResearchRunState::PlanReady;
+        run.warnings
+            .push(format!("temporary key {}", fake_secret()));
+
+        let err = write_checkpoint(&run_dir, &run)
+            .await
+            .expect_err("probable sk key should be rejected");
+
+        assert!(err.to_string().contains("forbidden secret marker `sk-`"));
+    }
+
+    fn fake_secret() -> String {
+        format!("sk-{}", "a".repeat(32))
     }
 
     fn temp_dir(name: &str) -> PathBuf {

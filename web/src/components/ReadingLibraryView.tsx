@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import {
   askPaperStream,
@@ -39,12 +39,29 @@ function ReadingLibraryView({
 }: ReadingLibraryViewProps) {
   const [activeItem, setActiveItem] = useState<ReadingLibraryItem | null>(null);
   const [loadingItem, setLoadingItem] = useState(false);
-  const [generating, setGenerating] = useState(false);
+  const [generatingPaperKey, setGeneratingPaperKey] = useState<string | null>(null);
+  const [generationQueue, setGenerationQueue] = useState<string[]>([]);
+  const [listCollapsed, setListCollapsed] = useState(false);
   const [question, setQuestion] = useState("");
   const [asking, setAsking] = useState(false);
   const [turns, setTurns] = useState<PaperTurn[]>([]);
+  const selectedKeyRef = useRef<string | null>(null);
+  const generationQueueRef = useRef<string[]>([]);
+  const generatingPaperKeyRef = useRef<string | null>(null);
 
   const selectedKey = activePaperKey ?? items[0]?.paper_key ?? null;
+
+  useEffect(() => {
+    selectedKeyRef.current = selectedKey;
+  }, [selectedKey]);
+
+  useEffect(() => {
+    generationQueueRef.current = generationQueue;
+  }, [generationQueue]);
+
+  useEffect(() => {
+    generatingPaperKeyRef.current = generatingPaperKey;
+  }, [generatingPaperKey]);
 
   useEffect(() => {
     if (!selectedKey) {
@@ -52,16 +69,27 @@ function ReadingLibraryView({
       setTurns([]);
       return;
     }
+    let cancelled = false;
+    setActiveItem(null);
+    setTurns([]);
     setLoadingItem(true);
     getReadingLibraryItem(selectedKey)
       .then((response) => {
+        if (cancelled) return;
         setActiveItem(response.item);
         setTurns(
           rebuildTurnsFromHistory(response.item.chat_history ?? [])
         );
       })
-      .catch((error: Error) => onNotice(error.message))
-      .finally(() => setLoadingItem(false));
+      .catch((error: Error) => {
+        if (!cancelled) onNotice(error.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingItem(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [selectedKey, onNotice]);
 
   const activeSummary = useMemo(
@@ -69,25 +97,73 @@ function ReadingLibraryView({
     [items, selectedKey]
   );
   const qualityWarning = activeItem ? noteQualityWarning(activeItem) : null;
+  const selectedGenerationState =
+    selectedKey && selectedKey === generatingPaperKey
+      ? "generating"
+      : selectedKey && generationQueue.includes(selectedKey)
+        ? "queued"
+        : "idle";
+  const activeDisplayStatus =
+    selectedGenerationState === "generating"
+      ? "generating_note"
+      : activeItem?.status ?? activeSummary?.status;
 
   async function handleGenerateNote() {
     if (!selectedKey) return;
-    setGenerating(true);
+    const runningPaperKey = generatingPaperKeyRef.current;
+    if (runningPaperKey) {
+      if (runningPaperKey === selectedKey || generationQueueRef.current.includes(selectedKey)) return;
+      enqueueGeneration(selectedKey);
+      onNotice("已加入阅读笔记生成队列。");
+      return;
+    }
+    void runGeneration(selectedKey);
+  }
+
+  function enqueueGeneration(paperKey: string) {
+    if (generationQueueRef.current.includes(paperKey)) return;
+    const nextQueue = [...generationQueueRef.current, paperKey];
+    generationQueueRef.current = nextQueue;
+    setGenerationQueue(nextQueue);
+  }
+
+  async function runGeneration(paperKey: string) {
+    generatingPaperKeyRef.current = paperKey;
+    setGeneratingPaperKey(paperKey);
     onNotice(null);
     try {
-      const response = await generateReadingNote(selectedKey, config);
-      setActiveItem(response.item);
+      const response = await generateReadingNote(paperKey, config);
+      if (selectedKeyRef.current === paperKey) {
+        setActiveItem(response.item);
+      }
       onItemUpdated(response.item);
-      onNotice(response.item.status === "failed" ? response.item.error ?? "笔记生成失败。" : "阅读笔记已生成。");
+      const failed = ["failed", "text_failed", "note_failed"].includes(response.item.status);
+      onNotice(
+        failed
+          ? response.item.error ?? `${response.item.title}：${statusLabel(response.item.status)}。`
+          : `${response.item.title}：阅读笔记已生成。`
+      );
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "阅读笔记生成失败。");
     } finally {
-      setGenerating(false);
+      const [nextPaperKey, ...remaining] = generationQueueRef.current;
+      generationQueueRef.current = remaining;
+      setGenerationQueue(remaining);
+      if (nextPaperKey) {
+        void runGeneration(nextPaperKey);
+      } else {
+        generatingPaperKeyRef.current = null;
+        setGeneratingPaperKey(null);
+      }
     }
   }
 
   async function handleDelete() {
     if (!selectedKey) return;
+    if (selectedGenerationState !== "idle") {
+      onNotice("这篇论文正在生成或排队中，暂时不能删除。");
+      return;
+    }
     onNotice(null);
     try {
       const response = await deleteReadingLibraryItem(selectedKey);
@@ -150,27 +226,59 @@ function ReadingLibraryView({
   }
 
   return (
-    <section className="reading-library-layout">
-      <aside className="library-list phase-card" aria-label="阅读库论文列表">
-        <div className="section-header">
-          <div>
-            <p className="eyebrow">阅读库</p>
-            <h2>{items.length} 篇论文</h2>
-          </div>
-        </div>
-        <div className="library-paper-list">
-          {items.map((item) => (
-            <button
-              key={item.paper_key}
-              className={item.paper_key === selectedKey ? "library-paper active" : "library-paper"}
-              type="button"
-              onClick={() => onSelectPaper(item.paper_key)}
-            >
-              <span>{item.title}</span>
-              <small>{statusLabel(item.status)} · {coverageLabel(item.text_coverage)}</small>
-            </button>
-          ))}
-        </div>
+    <section className={listCollapsed ? "reading-library-layout list-collapsed" : "reading-library-layout"}>
+      <aside
+        className={listCollapsed ? "library-list library-list-rail phase-card" : "library-list phase-card"}
+        aria-label="阅读库论文列表"
+      >
+        {listCollapsed ? (
+          <button
+            className="library-rail-button"
+            type="button"
+            aria-label="展开论文列表"
+            aria-expanded={false}
+            onClick={() => setListCollapsed(false)}
+            title="展开论文列表"
+          >
+            <span className="library-rail-count">{items.length}</span>
+            <span className="library-rail-label">阅读库</span>
+            <span className="library-rail-arrow">›</span>
+          </button>
+        ) : (
+          <>
+            <div className="section-header library-list-header">
+              <div>
+                <p className="eyebrow">阅读库</p>
+                <h2>{items.length} 篇论文</h2>
+              </div>
+              <button
+                className="icon-button library-collapse-button"
+                type="button"
+                aria-label="隐藏论文列表"
+                aria-expanded={true}
+                onClick={() => setListCollapsed(true)}
+                title="隐藏论文列表"
+              >
+                ‹
+              </button>
+            </div>
+            <div className="library-paper-list">
+              {items.map((item) => (
+                <button
+                  key={item.paper_key}
+                  className={item.paper_key === selectedKey ? "library-paper active" : "library-paper"}
+                  type="button"
+                  onClick={() => onSelectPaper(item.paper_key)}
+                >
+                  <span>{item.title}</span>
+                  <small>
+                    {runtimeStatusLabel(item, generatingPaperKey, generationQueue)} · {coverageLabel(item.text_coverage)}
+                  </small>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </aside>
 
       <section className="library-reader">
@@ -180,7 +288,9 @@ function ReadingLibraryView({
               <p className="eyebrow">Paper Reader</p>
               <h2>{activeItem?.title ?? activeSummary?.title ?? "论文加载中"}</h2>
             </div>
-            <span className="badge">{statusLabel(activeItem?.status ?? activeSummary?.status)}</span>
+            <span className="badge">
+              {selectedGenerationState === "queued" ? "排队中" : statusLabel(activeDisplayStatus)}
+            </span>
           </div>
 
           {loadingItem ? (
@@ -191,10 +301,24 @@ function ReadingLibraryView({
                 <a className="secondary-action" href={activeItem.abs_url} target="_blank" rel="noreferrer">
                   打开 arXiv
                 </a>
-                <button className="secondary-action" type="button" disabled={generating} onClick={handleGenerateNote}>
-                  {generating ? "生成中" : activeItem.note ? "重新生成笔记" : "生成阅读笔记"}
+                <button
+                  className="secondary-action"
+                  type="button"
+                  disabled={selectedGenerationState !== "idle"}
+                  onClick={handleGenerateNote}
+                >
+                  {generateButtonLabel(
+                    selectedGenerationState,
+                    Boolean(generatingPaperKey),
+                    Boolean(activeItem.note)
+                  )}
                 </button>
-                <button className="secondary-action danger-action" type="button" onClick={handleDelete}>
+                <button
+                  className="secondary-action danger-action"
+                  type="button"
+                  disabled={selectedGenerationState !== "idle"}
+                  onClick={handleDelete}
+                >
                   删除
                 </button>
               </div>
@@ -207,73 +331,78 @@ function ReadingLibraryView({
               <p className="muted">{activeItem.summary}</p>
             </>
           ) : (
-            <p className="muted">请选择一篇论文。</p>
+            <p className="muted">选择一篇论文查看状态。</p>
           )}
         </div>
 
-        <div className="library-content-grid">
-          <article className="markdown-preview library-note">
-            {activeItem?.status === "text_failed" ? (
-              <div className="empty-state inline-empty">
-                <h2>全文获取失败</h2>
-                <p>系统没有生成详细阅读笔记。请重试全文抓取，或打开 arXiv 手动确认论文 PDF 是否可访问。</p>
+        {activeItem && (
+          <div className="library-content-grid">
+            <article className="phase-card library-note">
+              <div className="section-header">
+                <div>
+                  <p className="eyebrow">Reading Note</p>
+                  <h3>论文笔记</h3>
+                </div>
               </div>
-            ) : activeItem?.note ? (
-              <ReactMarkdown>{activeItem.note.markdown}</ReactMarkdown>
-            ) : (
-              <div className="empty-state inline-empty">
-                <h2>等待阅读笔记</h2>
-                <p>点击“生成阅读笔记”后，这里会显示结构化论文笔记。</p>
-              </div>
-            )}
-          </article>
-
-          <aside className="report-chat paper-chat">
-            <div className="section-header">
-              <div>
-                <p className="eyebrow">Paper Q&A</p>
-                <h2>围绕这篇论文追问</h2>
-              </div>
-              <span className="badge">{turns.length}</span>
-            </div>
-
-            <div className="chat-transcript">
-              {turns.length === 0 ? (
-                <p className="muted">可以追问方法细节、实验充分性、复现风险或与当前调研主题的关系。</p>
+              {activeItem.note ? (
+                <ReactMarkdown>{activeItem.note.markdown}</ReactMarkdown>
               ) : (
-                turns.map((turn, index) => (
-                  <article key={`${turn.question}-${index}`} className="qa-turn">
-                    <h3>{turn.question}</h3>
-                    {turn.answer ? (
-                      <div className="markdown-answer">
-                        <ReactMarkdown>{turn.answer}</ReactMarkdown>
-                      </div>
-                    ) : (
-                      <p className="muted">DeepSeek 正在流式输出回答...</p>
-                    )}
-                  </article>
-                ))
+                <div className="empty-state inline-empty">
+                  <p>还没有生成阅读笔记。</p>
+                </div>
               )}
-            </div>
+            </article>
 
-            <label className="field">
-              <span>问题</span>
-              <textarea
-                value={question}
-                rows={4}
-                disabled={!activeItem || asking}
-                onChange={(event) => setQuestion(event.target.value)}
-                placeholder="例如：这篇论文的实验设计有哪些薄弱点？"
-              />
-            </label>
-            <button className="primary-action" type="button" disabled={!activeItem || asking} onClick={handleAsk}>
-              {asking ? "回答中" : "提交问题"}
-            </button>
-          </aside>
-        </div>
+            <aside className="phase-card paper-chat">
+              <div className="section-header">
+                <div>
+                  <p className="eyebrow">Paper Chat</p>
+                  <h3>追问论文</h3>
+                </div>
+              </div>
+              <div className="paper-chat-turns">
+                {turns.length === 0 ? (
+                  <p className="muted">围绕这篇论文继续提问。</p>
+                ) : (
+                  turns.map((turn, index) => (
+                    <div className="paper-chat-turn" key={`${turn.question}-${index}`}>
+                      <strong>Q: {turn.question}</strong>
+                      <ReactMarkdown>{turn.answer || "..."}</ReactMarkdown>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="paper-chat-input">
+                <textarea
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  placeholder="例如：这篇论文的核心方法和局限是什么？"
+                  rows={3}
+                />
+                <button className="primary-action" type="button" onClick={handleAsk} disabled={asking}>
+                  {asking ? "回答中..." : "发送"}
+                </button>
+              </div>
+            </aside>
+          </div>
+        )}
       </section>
     </section>
   );
+}
+
+function rebuildTurnsFromHistory(history: ReadingLibraryItem["chat_history"]): PaperTurn[] {
+  const turns: PaperTurn[] = [];
+  let pendingQuestion: string | null = null;
+  for (const message of history) {
+    if (message.role === "user") {
+      pendingQuestion = message.content;
+    } else if (message.role === "assistant" && pendingQuestion) {
+      turns.push({ question: pendingQuestion, answer: message.content });
+      pendingQuestion = null;
+    }
+  }
+  return turns;
 }
 
 function TextMetaPanel({ item }: { item: ReadingLibraryItem }) {
@@ -296,20 +425,6 @@ function TextMetaPanel({ item }: { item: ReadingLibraryItem }) {
   );
 }
 
-function rebuildTurnsFromHistory(history: ReadingLibraryItem["chat_history"]): PaperTurn[] {
-  const turns: PaperTurn[] = [];
-  for (let index = 0; index < history.length; index += 1) {
-    const message = history[index];
-    if (message.role !== "user") continue;
-    const next = history[index + 1];
-    turns.push({
-      question: message.content,
-      answer: next?.role === "assistant" ? next.content : ""
-    });
-  }
-  return turns;
-}
-
 function statusLabel(status?: string | null) {
   return (
     {
@@ -327,6 +442,27 @@ function statusLabel(status?: string | null) {
       failed: "失败"
     }[status ?? ""] ?? "未知"
   );
+}
+
+function runtimeStatusLabel(
+  item: ReadingLibrarySummary,
+  generatingPaperKey: string | null,
+  generationQueue: string[]
+) {
+  if (item.paper_key === generatingPaperKey) return "阅读笔记生成中";
+  if (generationQueue.includes(item.paper_key)) return "排队中";
+  return statusLabel(item.status);
+}
+
+function generateButtonLabel(
+  state: "idle" | "generating" | "queued",
+  hasRunningJob: boolean,
+  hasNote: boolean
+) {
+  if (state === "generating") return "阅读笔记生成中";
+  if (state === "queued") return "已加入生成队列";
+  if (hasRunningJob) return "加入生成队列";
+  return hasNote ? "重新生成笔记" : "生成阅读笔记";
 }
 
 function coverageLabel(coverage?: string | null) {

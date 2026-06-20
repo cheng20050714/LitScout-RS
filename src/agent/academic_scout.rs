@@ -3,8 +3,10 @@ use uuid::Uuid;
 
 use crate::config::AppConfig;
 use crate::error::{AppError, Result};
-use crate::model::{QueryAttempt, QueryPortfolio, SearchQuery, SourceItem, SourceQueryLineage};
-use crate::sources::{dblp, semantic_scholar};
+use crate::model::{
+    QueryAttempt, QueryPortfolio, SearchQuery, SourceItem, SourceKind, SourceQueryLineage,
+};
+use crate::sources::{crossref, dblp, openalex, semantic_scholar};
 
 pub async fn scout_academic_extra(
     portfolio: &[QueryPortfolio],
@@ -25,45 +27,47 @@ pub async fn scout_academic_extra(
                 arxiv_limit: budget,
             };
 
-            let semantic_started_at = Utc::now();
-            let semantic_result = semantic_scholar::search_papers(&search_query, config).await;
-            let (semantic_items, semantic_attempt) = run_source_attempt(
-                "semantic_scholar",
-                &query,
-                &portfolio_item.chapter_id,
-                round,
-                semantic_started_at,
-                semantic_result,
-            );
-            source_lineage.extend(lineage_for_items(
-                &semantic_attempt.query_id,
-                &portfolio_item.chapter_id,
-                &semantic_items,
-            ));
-            items.extend(semantic_items);
-            attempts.push(semantic_attempt);
-
-            let dblp_started_at = Utc::now();
-            let dblp_result = dblp::search_publications(&search_query, config).await;
-            let (dblp_items, dblp_attempt) = run_source_attempt(
-                "dblp",
-                &query,
-                &portfolio_item.chapter_id,
-                round,
-                dblp_started_at,
-                dblp_result,
-            );
-            source_lineage.extend(lineage_for_items(
-                &dblp_attempt.query_id,
-                &portfolio_item.chapter_id,
-                &dblp_items,
-            ));
-            items.extend(dblp_items);
-            attempts.push(dblp_attempt);
+            for adapter in AcademicAdapter::all() {
+                let started_at = Utc::now();
+                if let Some(reason) = adapter.unavailable_reason(config) {
+                    attempts.push(skipped_source_attempt(
+                        adapter,
+                        &query,
+                        &portfolio_item.chapter_id,
+                        round,
+                        started_at,
+                        reason,
+                    ));
+                    continue;
+                }
+                let result = adapter.search(&search_query, config).await;
+                let (adapter_items, attempt) = run_source_attempt(
+                    adapter,
+                    &query,
+                    &portfolio_item.chapter_id,
+                    round,
+                    started_at,
+                    result,
+                );
+                source_lineage.extend(lineage_for_items(
+                    &attempt.query_id,
+                    &portfolio_item.chapter_id,
+                    &adapter_items,
+                ));
+                items.extend(adapter_items);
+                attempts.push(attempt);
+            }
         }
     }
 
     Ok((items, attempts, source_lineage))
+}
+
+pub fn academic_source_names() -> Vec<&'static str> {
+    AcademicAdapter::all()
+        .into_iter()
+        .map(AcademicAdapter::source_name)
+        .collect()
 }
 
 fn academic_queries(item: &QueryPortfolio) -> Vec<String> {
@@ -80,35 +84,127 @@ fn academic_queries(item: &QueryPortfolio) -> Vec<String> {
         .collect()
 }
 
+#[derive(Debug, Clone, Copy)]
+enum AcademicAdapter {
+    SemanticScholar,
+    Dblp,
+    OpenAlex,
+    Crossref,
+}
+
+impl AcademicAdapter {
+    fn all() -> [Self; 4] {
+        [
+            Self::SemanticScholar,
+            Self::Dblp,
+            Self::OpenAlex,
+            Self::Crossref,
+        ]
+    }
+
+    fn source_name(self) -> &'static str {
+        match self {
+            Self::SemanticScholar => "semantic_scholar",
+            Self::Dblp => "dblp",
+            Self::OpenAlex => "openalex",
+            Self::Crossref => "crossref",
+        }
+    }
+
+    fn source_kind(self) -> SourceKind {
+        match self {
+            Self::SemanticScholar | Self::OpenAlex => SourceKind::AcademicIndex,
+            Self::Dblp | Self::Crossref => SourceKind::Bibliography,
+        }
+    }
+
+    fn attempt_prefix(self) -> &'static str {
+        match self {
+            Self::SemanticScholar => "ss",
+            Self::Dblp => "db",
+            Self::OpenAlex => "oa",
+            Self::Crossref => "cr",
+        }
+    }
+
+    fn unavailable_reason(self, config: &AppConfig) -> Option<&'static str> {
+        match self {
+            Self::OpenAlex
+                if config
+                    .openalex_api_key
+                    .as_deref()
+                    .is_none_or(|key| key.trim().is_empty()) =>
+            {
+                Some("OPENALEX_API_KEY is not configured; skipped OpenAlex search")
+            }
+            _ => None,
+        }
+    }
+
+    async fn search(self, query: &SearchQuery, config: &AppConfig) -> Result<Vec<SourceItem>> {
+        match self {
+            Self::SemanticScholar => semantic_scholar::search_papers(query, config).await,
+            Self::Dblp => dblp::search_publications(query, config).await,
+            Self::OpenAlex => openalex::search_works(query, config).await,
+            Self::Crossref => crossref::search_works(query, config).await,
+        }
+    }
+}
+
+fn skipped_source_attempt(
+    adapter: AcademicAdapter,
+    query: &str,
+    chapter_id: &str,
+    round: usize,
+    started_at: chrono::DateTime<Utc>,
+    reason: &'static str,
+) -> QueryAttempt {
+    QueryAttempt {
+        query_id: format!("{}-{}", adapter.attempt_prefix(), Uuid::new_v4()),
+        source: adapter.source_name().to_string(),
+        query: query.to_string(),
+        chapter_id: chapter_id.to_string(),
+        round,
+        started_at,
+        finished_at: Some(Utc::now()),
+        result_count: 0,
+        source_kind: Some(adapter.source_kind()),
+        http_status: None,
+        rate_limit_info: None,
+        parser_error: None,
+        is_citeable: false,
+        error: Some(reason.to_string()),
+    }
+}
+
 fn run_source_attempt(
-    source: &str,
+    adapter: AcademicAdapter,
     query: &str,
     chapter_id: &str,
     round: usize,
     started_at: chrono::DateTime<Utc>,
     result: Result<Vec<SourceItem>>,
 ) -> (Vec<SourceItem>, QueryAttempt) {
-    let query_id = format!("{}-{}", source_prefix(source), Uuid::new_v4());
+    let query_id = format!("{}-{}", adapter.attempt_prefix(), Uuid::new_v4());
     match result {
         Ok(items) => {
             let result_count = items.len();
-            let source_kind = items.first().map(|item| item.kind);
             (
                 items,
                 QueryAttempt {
                     query_id,
-                    source: source.to_string(),
+                    source: adapter.source_name().to_string(),
                     query: query.to_string(),
                     chapter_id: chapter_id.to_string(),
                     round,
                     started_at,
                     finished_at: Some(Utc::now()),
                     result_count,
-                    source_kind,
+                    source_kind: Some(adapter.source_kind()),
                     http_status: None,
                     rate_limit_info: None,
                     parser_error: None,
-                    is_citeable: true,
+                    is_citeable: result_count > 0,
                     error: None,
                 },
             )
@@ -119,14 +215,14 @@ fn run_source_attempt(
             let parser_error = parser_error_from_error(&err);
             QueryAttempt {
                 query_id,
-                source: source.to_string(),
+                source: adapter.source_name().to_string(),
                 query: query.to_string(),
                 chapter_id: chapter_id.to_string(),
                 round,
                 started_at,
                 finished_at: Some(Utc::now()),
                 result_count: 0,
-                source_kind: source_kind_for_source(source),
+                source_kind: Some(adapter.source_kind()),
                 http_status,
                 rate_limit_info,
                 parser_error,
@@ -154,22 +250,6 @@ fn lineage_for_items(
             merged_from_item_ids: Vec::new(),
         })
         .collect()
-}
-
-fn source_kind_for_source(source: &str) -> Option<crate::model::SourceKind> {
-    match source {
-        "semantic_scholar" => Some(crate::model::SourceKind::AcademicIndex),
-        "dblp" => Some(crate::model::SourceKind::Bibliography),
-        _ => None,
-    }
-}
-
-fn source_prefix(source: &str) -> &'static str {
-    match source {
-        "semantic_scholar" => "ss",
-        "dblp" => "db",
-        _ => "src",
-    }
 }
 
 fn http_status_from_error(err: &AppError) -> Option<u16> {
@@ -200,9 +280,13 @@ fn parser_error_from_error(err: &AppError) -> Option<String> {
 mod tests {
     use chrono::Utc;
 
-    use super::{academic_queries, run_source_attempt};
+    use super::{
+        academic_queries, academic_source_names, run_source_attempt, skipped_source_attempt,
+        AcademicAdapter,
+    };
+    use crate::config::AppConfig;
     use crate::error::AppError;
-    use crate::model::QueryPortfolio;
+    use crate::model::{QueryPortfolio, SourceKind};
 
     #[test]
     fn academic_queries_deduplicate_arxiv_and_github_queries() {
@@ -220,9 +304,17 @@ mod tests {
     }
 
     #[test]
+    fn academic_registry_uses_stable_source_order() {
+        assert_eq!(
+            academic_source_names(),
+            vec!["semantic_scholar", "dblp", "openalex", "crossref"]
+        );
+    }
+
+    #[test]
     fn failed_academic_attempt_records_status_and_rate_limit() {
         let (_items, attempt) = run_source_attempt(
-            "semantic_scholar",
+            AcademicAdapter::SemanticScholar,
             "rust agent",
             "ch-1",
             1,
@@ -234,6 +326,7 @@ mod tests {
         );
 
         assert_eq!(attempt.result_count, 0);
+        assert_eq!(attempt.source_kind, Some(SourceKind::AcademicIndex));
         assert_eq!(attempt.http_status, Some(429));
         assert_eq!(
             attempt.rate_limit_info.as_deref(),
@@ -247,7 +340,7 @@ mod tests {
     fn failed_academic_attempt_records_parser_error() {
         let err = serde_json::from_str::<serde_json::Value>("{").expect_err("invalid json");
         let (_items, attempt) = run_source_attempt(
-            "dblp",
+            AcademicAdapter::Dblp,
             "rust agent",
             "ch-1",
             1,
@@ -255,9 +348,68 @@ mod tests {
             Err(AppError::Json(err)),
         );
 
+        assert_eq!(attempt.source_kind, Some(SourceKind::Bibliography));
         assert_eq!(attempt.http_status, None);
         assert!(attempt.parser_error.is_some());
         assert!(attempt.error.is_some());
         assert!(!attempt.is_citeable);
+    }
+
+    #[test]
+    fn empty_successful_attempt_is_not_citeable() {
+        let (_items, attempt) = run_source_attempt(
+            AcademicAdapter::Crossref,
+            "rust agent",
+            "ch-1",
+            1,
+            Utc::now(),
+            Ok(Vec::new()),
+        );
+
+        assert_eq!(attempt.result_count, 0);
+        assert_eq!(attempt.source_kind, Some(SourceKind::Bibliography));
+        assert!(attempt.error.is_none());
+        assert!(!attempt.is_citeable);
+    }
+
+    #[test]
+    fn openalex_without_key_is_recorded_as_skipped_not_http_failure() {
+        let config = test_config();
+
+        let reason = AcademicAdapter::OpenAlex
+            .unavailable_reason(&config)
+            .expect("OpenAlex should require an explicit key");
+        let attempt = skipped_source_attempt(
+            AcademicAdapter::OpenAlex,
+            "rust agent",
+            "ch-1",
+            1,
+            Utc::now(),
+            reason,
+        );
+
+        assert_eq!(attempt.source, "openalex");
+        assert_eq!(attempt.source_kind, Some(SourceKind::AcademicIndex));
+        assert_eq!(attempt.http_status, None);
+        assert_eq!(attempt.parser_error, None);
+        assert!(attempt.error.as_deref().unwrap_or("").contains("skipped"));
+        assert!(!attempt.is_citeable);
+    }
+
+    fn test_config() -> AppConfig {
+        AppConfig {
+            github_token: None,
+            semantic_scholar_api_key: None,
+            openalex_api_key: None,
+            crossref_mailto: None,
+            output: std::env::temp_dir(),
+            cache_dir: std::env::temp_dir(),
+            session_dir: std::env::temp_dir(),
+            tags_file: None,
+            use_cache: false,
+            cache_ttl_hours: 24,
+            timeout_secs: 30,
+            enrich: false,
+        }
     }
 }

@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use reqwest::header::{HeaderMap, RETRY_AFTER};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use crate::config::AppConfig;
 use crate::error::{AppError, Result};
@@ -88,11 +88,11 @@ struct SemanticScholarPaper {
     venue: Option<String>,
     citation_count: Option<u64>,
     url: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     authors: Vec<SemanticScholarAuthor>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     external_ids: SemanticScholarExternalIds,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     fields_of_study: Vec<String>,
 }
 
@@ -106,7 +106,8 @@ impl SemanticScholarPaper {
             .filter_map(|author| clean_required(author.name))
             .collect::<Vec<_>>();
         let venue = clean_optional(self.venue);
-        let doi = clean_optional(self.external_ids.doi);
+        let external_ids = semantic_scholar_external_ids(&self.external_ids);
+        let doi = clean_optional(self.external_ids.doi.clone());
         let summary = clean_optional(self.abstract_text)
             .unwrap_or_else(|| bibliographic_summary(&authors, venue.as_deref(), self.year));
         let evidence_snippet = excerpt(&summary, 420);
@@ -135,6 +136,7 @@ impl SemanticScholarPaper {
                 citation_count: self.citation_count,
                 native_id: paper_id,
                 source_name: "semantic_scholar".to_string(),
+                external_ids,
             },
         })
     }
@@ -144,11 +146,21 @@ impl SemanticScholarPaper {
 struct SemanticScholarExternalIds {
     #[serde(rename = "DOI")]
     doi: Option<String>,
+    #[serde(rename = "ArXiv")]
+    arxiv: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct SemanticScholarAuthor {
     name: Option<String>,
+}
+
+fn deserialize_null_default<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 fn clean_required(value: Option<String>) -> Option<String> {
@@ -159,6 +171,17 @@ fn clean_optional(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.split_whitespace().collect::<Vec<_>>().join(" "))
         .filter(|value| !value.is_empty())
+}
+
+fn semantic_scholar_external_ids(external_ids: &SemanticScholarExternalIds) -> Vec<String> {
+    let mut ids = Vec::new();
+    if let Some(doi) = clean_optional(external_ids.doi.clone()) {
+        ids.push(format!("doi:{}", doi.to_ascii_lowercase()));
+    }
+    if let Some(arxiv) = clean_optional(external_ids.arxiv.clone()) {
+        ids.push(format!("arxiv:{}", crate::model::stable_arxiv_id(&arxiv)));
+    }
+    ids
 }
 
 fn bibliographic_summary(authors: &[String], venue: Option<&str>, year: Option<i32>) -> String {
@@ -231,5 +254,24 @@ mod tests {
         .expect("malformed records should be skipped");
 
         assert!(items.is_empty());
+    }
+
+    #[test]
+    fn tolerates_semantic_scholar_null_lists() {
+        let items = parse_search_response(
+            r#"{"data":[{
+                "paperId":"abc-null",
+                "title":"Nullable Semantic Scholar Lists",
+                "authors":null,
+                "fieldsOfStudy":null,
+                "externalIds":{},
+                "abstract":null
+            }]}"#,
+        )
+        .expect("null list fields should parse");
+
+        assert_eq!(items.len(), 1);
+        assert!(items[0].tags.is_empty());
+        assert!(items[0].summary.contains("Bibliographic metadata"));
     }
 }

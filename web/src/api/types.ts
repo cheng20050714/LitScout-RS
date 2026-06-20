@@ -5,6 +5,8 @@ export interface FrontendConfig {
   deepseek_side_model?: string;
   github_token?: string;
   semantic_scholar_api_key?: string;
+  openalex_api_key?: string;
+  crossref_mailto?: string;
 }
 
 export type ResearchRunState =
@@ -356,10 +358,6 @@ export interface CoverageResponse {
 export interface CitationAuditResponse {
   run_id: string;
   citation_audit: CitationAuditReport;
-}
-
-export interface ReportChatResponse {
-  answer: string;
 }
 
 export interface ChatStreamEvent {

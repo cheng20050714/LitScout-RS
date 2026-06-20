@@ -27,6 +27,8 @@ function AgentControlPanel({
   const [topic, setTopic] = useState("");
   const [githubBudget, setGithubBudget] = useState(10);
   const [arxivBudget, setArxivBudget] = useState(10);
+  const [academicExtraEnabled, setAcademicExtraEnabled] = useState(false);
+  const [academicBudget, setAcademicBudget] = useState(10);
   const [maxAspects, setMaxAspects] = useState(3);
   const [skipPlanCritic, setSkipPlanCritic] = useState(false);
   const [skipCoverageCritic, setSkipCoverageCritic] = useState(false);
@@ -48,8 +50,8 @@ function AgentControlPanel({
       max_aspects_per_round: clamp(maxAspects, 1, 3),
       github_budget: clamp(githubBudget, 1, 50),
       arxiv_budget: clamp(arxivBudget, 1, 50),
-      academic_extra_enabled: false,
-      academic_budget: 10,
+      academic_extra_enabled: academicExtraEnabled,
+      academic_budget: clamp(academicBudget, 1, 50),
       auto_approve_plan: false,
       allow_github_enrich: true,
       require_citation_audit: true,
@@ -146,6 +148,31 @@ function AgentControlPanel({
             onChange={(event) => setMaxAspects(Number(event.target.value))}
           />
         </label>
+
+        <div className="academic-extra-panel">
+          <label className="academic-extra-toggle">
+            <input
+              type="checkbox"
+              checked={academicExtraEnabled}
+              onChange={(event) => setAcademicExtraEnabled(event.target.checked)}
+            />
+            <span>
+              <strong>扩展学术源</strong>
+              <small>启用 Semantic Scholar、DBLP、OpenAlex、Crossref，扩大论文和书目元数据覆盖。</small>
+            </span>
+          </label>
+          <label className="field academic-extra-limit">
+            <span>扩展源单源上限</span>
+            <input
+              min={1}
+              max={50}
+              type="number"
+              value={academicBudget}
+              disabled={!academicExtraEnabled}
+              onChange={(event) => setAcademicBudget(Number(event.target.value))}
+            />
+          </label>
+        </div>
 
         <div className="switch-row" style={{ marginTop: 12 }}>
           <label>

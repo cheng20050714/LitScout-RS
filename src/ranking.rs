@@ -221,7 +221,9 @@ mod tests {
     use chrono::{DateTime, Utc};
 
     use super::{rank_items, score_item};
-    use crate::model::{GitHubRepo, SearchQuery, SourceItem, SourceKind, SourceMetadata};
+    use crate::model::{
+        ArxivPaper, GitHubRepo, SearchQuery, SourceItem, SourceKind, SourceMetadata,
+    };
 
     fn dt(value: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(value)
@@ -310,6 +312,7 @@ mod tests {
                 citation_count: None,
                 native_id: "conf/test/weak".to_string(),
                 source_name: "dblp".to_string(),
+                external_ids: Vec::new(),
             },
         };
 
@@ -346,11 +349,60 @@ mod tests {
                 citation_count: Some(1_000_000),
                 native_id: "highly-cited".to_string(),
                 source_name: "semantic_scholar".to_string(),
+                external_ids: Vec::new(),
             },
         };
 
         score_item(&mut item, &query, dt("2026-05-30T00:00:00Z"));
 
         assert_eq!(item.score_breakdown.popularity_score, 4.0);
+    }
+
+    #[test]
+    fn openalex_citation_signal_does_not_displace_clearly_relevant_arxiv() {
+        let query = SearchQuery {
+            topic: "rust agent benchmark".to_string(),
+            github_limit: 10,
+            arxiv_limit: 10,
+        };
+        let arxiv = SourceItem::from(&ArxivPaper {
+            arxiv_id: "2601.00001v1".to_string(),
+            title: "Rust Agent Benchmark".to_string(),
+            authors: vec!["Ada Lovelace".to_string()],
+            summary: "Rust agent benchmark for tool calling systems.".to_string(),
+            published_at: dt("2026-05-20T00:00:00Z"),
+            updated_at: None,
+            categories: vec!["cs.AI".to_string()],
+            abs_url: "https://arxiv.org/abs/2601.00001v1".to_string(),
+            pdf_url: None,
+        });
+        let openalex = SourceItem {
+            id: "openalex:W1".to_string(),
+            kind: SourceKind::AcademicIndex,
+            title: "Agent Systems".to_string(),
+            url: "https://openalex.org/W1".to_string(),
+            summary: "Agent systems.".to_string(),
+            evidence_snippet: "Agent systems.".to_string(),
+            tags: vec!["Computer Science".to_string()],
+            score: 0.0,
+            score_reasons: Vec::new(),
+            classification_reasons: Vec::new(),
+            score_breakdown: Default::default(),
+            published_or_updated_at: None,
+            metadata: SourceMetadata::AcademicIndex {
+                authors: vec!["Alan Turing".to_string()],
+                venue: Some("TestConf".to_string()),
+                year: Some(2024),
+                doi: Some("10.0000/agent-systems".to_string()),
+                citation_count: Some(1_000_000),
+                native_id: "W1".to_string(),
+                source_name: "openalex".to_string(),
+                external_ids: vec!["doi:10.0000/agent-systems".to_string()],
+            },
+        };
+
+        let ranked = rank_items(&query, vec![openalex, arxiv]);
+
+        assert_eq!(ranked[0].id, "arxiv:2601.00001");
     }
 }

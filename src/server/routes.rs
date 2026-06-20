@@ -13,7 +13,7 @@ use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 
-use crate::agent::{orchestrator, report_chat};
+use crate::agent::orchestrator;
 use crate::checkpoint;
 use crate::config::{AppConfig, LlmConfig};
 use crate::error::{AppError, Result};
@@ -27,9 +27,9 @@ use super::dto::{
     AddReadingLibraryItemRequest, BranchRunRequest, ChatStreamEvent, CheckpointListResponse,
     CitationAuditResponse, ContinueStatefulRunRequest, CoverageResponse, CreateStatefulRunRequest,
     EvidenceResponse, FrontendConfig, GenerateReadingNoteRequest, PaperChatRequest,
-    ReadingLibraryItemResponse, ReadingLibraryResponse, ReportChatRequest, ReportChatResponse,
-    ReportTranslateRequest, ReportTranslateResponse, ReviseStatefulPlanRequest,
-    StatefulRunResponse, StatefulRunStreamEvent,
+    ReadingLibraryItemResponse, ReadingLibraryResponse, ReportTranslateRequest,
+    ReportTranslateResponse, ReviseStatefulPlanRequest, StatefulRunResponse,
+    StatefulRunStreamEvent,
 };
 use super::state::AppState;
 
@@ -64,8 +64,6 @@ pub fn build_router(state: AppState) -> Router {
             "/api/runs/{run_id}/branch-from-checkpoint",
             post(branch_stateful_run),
         )
-        .route("/api/report/chat", post(chat_with_report))
-        .route("/api/report/chat/stream", post(chat_with_report_stream))
         .route("/api/report/translate", post(translate_report))
         .route("/api/library", get(list_reading_library))
         .route("/api/library/items", post(add_reading_library_item))
@@ -336,75 +334,6 @@ async fn branch_stateful_run(
     }))
 }
 
-async fn chat_with_report(
-    State(state): State<AppState>,
-    Json(req): Json<ReportChatRequest>,
-) -> Result<Json<ReportChatResponse>> {
-    let answer = report_chat::answer_report_question(
-        &req.report_markdown,
-        &req.question,
-        &effective_llm_config(&state, &req.config),
-    )
-    .await?;
-    Ok(Json(ReportChatResponse { answer }))
-}
-
-async fn chat_with_report_stream(
-    State(state): State<AppState>,
-    Json(req): Json<ReportChatRequest>,
-) -> Sse<impl Stream<Item = std::result::Result<Event, Infallible>>> {
-    let (tx, rx) = mpsc::channel::<ChatStreamEvent>(32);
-
-    tokio::spawn(async move {
-        let (delta_tx, mut delta_rx) = mpsc::channel::<String>(32);
-        let forward_tx = tx.clone();
-        tokio::spawn(async move {
-            while let Some(text) = delta_rx.recv().await {
-                if forward_tx
-                    .send(ChatStreamEvent::Delta { text })
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
-        let result = report_chat::answer_report_question_streaming(
-            &req.report_markdown,
-            &req.question,
-            &effective_llm_config(&state, &req.config),
-            delta_tx,
-        )
-        .await;
-        match result {
-            Ok(_) => {
-                let _ = tx.send(ChatStreamEvent::Done).await;
-            }
-            Err(err) => {
-                let _ = tx
-                    .send(ChatStreamEvent::Failed {
-                        error: err.to_string(),
-                    })
-                    .await;
-            }
-        }
-    });
-
-    let stream = ReceiverStream::new(rx).map(|event| {
-        let event_name = match event {
-            ChatStreamEvent::Delta { .. } => "delta",
-            ChatStreamEvent::Done => "done",
-            ChatStreamEvent::Failed { .. } => "failed",
-        };
-        Ok(Event::default()
-            .event(event_name)
-            .json_data(event)
-            .unwrap_or_else(|err| Event::default().event("failed").data(err.to_string())))
-    });
-
-    Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
-}
-
 async fn list_reading_library(
     State(state): State<AppState>,
 ) -> Result<Json<ReadingLibraryResponse>> {
@@ -661,6 +590,12 @@ fn effective_app_config(state: &AppState, frontend: &FrontendConfig) -> AppConfi
     if let Some(key) = non_empty(frontend.semantic_scholar_api_key.as_deref()) {
         app_config.semantic_scholar_api_key = Some(key.to_string());
     }
+    if let Some(key) = non_empty(frontend.openalex_api_key.as_deref()) {
+        app_config.openalex_api_key = Some(key.to_string());
+    }
+    if let Some(mailto) = non_empty(frontend.crossref_mailto.as_deref()) {
+        app_config.crossref_mailto = Some(mailto.to_string());
+    }
     app_config
 }
 
@@ -713,6 +648,8 @@ mod tests {
         AppConfig {
             github_token: None,
             semantic_scholar_api_key: None,
+            openalex_api_key: None,
+            crossref_mailto: None,
             output: PathBuf::from("reports"),
             cache_dir: PathBuf::from(".litscout-cache"),
             session_dir: PathBuf::from("sessions"),

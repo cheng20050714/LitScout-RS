@@ -269,6 +269,8 @@ mod tests {
         AppConfig {
             github_token: None,
             semantic_scholar_api_key: None,
+            openalex_api_key: None,
+            crossref_mailto: None,
             output: session_dir.join("reports"),
             cache_dir: session_dir.join("cache"),
             session_dir,

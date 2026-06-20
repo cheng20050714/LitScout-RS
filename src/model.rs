@@ -169,6 +169,8 @@ pub enum SourceMetadata {
         citation_count: Option<u64>,
         native_id: String,
         source_name: String,
+        #[serde(default)]
+        external_ids: Vec<String>,
     },
     Bibliography {
         authors: Vec<String>,
@@ -178,6 +180,8 @@ pub enum SourceMetadata {
         citation_count: Option<u64>,
         native_id: String,
         source_name: String,
+        #[serde(default)]
+        external_ids: Vec<String>,
     },
 }
 
@@ -592,6 +596,31 @@ mod tests {
         assert_eq!(attempt.source_kind, None);
         assert!(attempt.is_citeable);
         assert_eq!(attempt.http_status, None);
+    }
+
+    #[test]
+    fn academic_metadata_deserializes_without_external_ids() {
+        let json = r#"{
+            "kind": "academic_index",
+            "authors": ["Ada Lovelace"],
+            "venue": "TestConf",
+            "year": 2026,
+            "doi": "10.1234/tool-agent",
+            "citation_count": 42,
+            "native_id": "abc123",
+            "source_name": "semantic_scholar"
+        }"#;
+
+        let metadata: SourceMetadata =
+            serde_json::from_str(json).expect("legacy academic metadata parses");
+
+        assert!(matches!(
+            metadata,
+            SourceMetadata::AcademicIndex {
+                ref external_ids,
+                ..
+            } if external_ids.is_empty()
+        ));
     }
 
     #[test]

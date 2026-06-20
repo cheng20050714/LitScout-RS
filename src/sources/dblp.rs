@@ -102,6 +102,7 @@ impl DblpHit {
         let venue = clean_optional(self.info.venue);
         let year = self.info.year.and_then(|year| year.parse::<i32>().ok());
         let doi = clean_optional(self.info.doi);
+        let external_ids = bibliography_external_ids(doi.as_deref(), Some(&key));
         let url = self
             .info
             .ee
@@ -130,6 +131,7 @@ impl DblpHit {
                 citation_count: None,
                 native_id: key,
                 source_name: "dblp".to_string(),
+                external_ids,
             },
         })
     }
@@ -157,10 +159,10 @@ struct DblpAuthors {
 impl DblpAuthors {
     fn into_names(self) -> Vec<String> {
         match self.author {
-            DblpAuthorList::One(author) => clean_optional(Some(author)).into_iter().collect(),
+            DblpAuthorList::One(author) => author.into_name().into_iter().collect(),
             DblpAuthorList::Many(authors) => authors
                 .into_iter()
-                .filter_map(|author| clean_optional(Some(author)))
+                .filter_map(DblpAuthor::into_name)
                 .collect(),
             DblpAuthorList::None => Vec::new(),
         }
@@ -170,10 +172,30 @@ impl DblpAuthors {
 #[derive(Debug, Default, Deserialize)]
 #[serde(untagged)]
 enum DblpAuthorList {
-    One(String),
-    Many(Vec<String>),
+    One(DblpAuthor),
+    Many(Vec<DblpAuthor>),
     #[default]
     None,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum DblpAuthor {
+    Text(String),
+    Object {
+        #[serde(rename = "text")]
+        text: Option<String>,
+        name: Option<String>,
+    },
+}
+
+impl DblpAuthor {
+    fn into_name(self) -> Option<String> {
+        match self {
+            Self::Text(value) => clean_optional(Some(value)),
+            Self::Object { text, name } => clean_optional(text.or(name)),
+        }
+    }
 }
 
 fn clean_required(value: Option<String>) -> Option<String> {
@@ -191,6 +213,23 @@ fn clean_optional(value: Option<String>) -> Option<String> {
                 .join(" ")
         })
         .filter(|value| !value.is_empty())
+}
+
+fn bibliography_external_ids(doi: Option<&str>, native_id: Option<&str>) -> Vec<String> {
+    let mut ids = Vec::new();
+    if let Some(doi) = doi {
+        let doi = doi.trim();
+        if !doi.is_empty() {
+            ids.push(format!("doi:{}", doi.to_ascii_lowercase()));
+        }
+    }
+    if let Some(native_id) = native_id {
+        let native_id = native_id.trim();
+        if !native_id.is_empty() {
+            ids.push(format!("dblp:{native_id}"));
+        }
+    }
+    ids
 }
 
 fn bibliographic_summary(authors: &[String], venue: Option<&str>, year: Option<i32>) -> String {
@@ -252,5 +291,22 @@ mod tests {
         .expect("malformed records should be skipped");
 
         assert!(items.is_empty());
+    }
+
+    #[test]
+    fn parses_dblp_object_authors() {
+        let items = parse_search_response(
+            r#"{"result":{"hits":{"hit":[{"info":{
+                "key":"conf/test/ObjectAuthor2026",
+                "title":"Object Author Shapes.",
+                "authors":{"author":[{"text":"Ada Lovelace"},{"name":"Grace Hopper"}]},
+                "venue":"TestConf",
+                "year":"2026"
+            }}]}}}"#,
+        )
+        .expect("object author shapes should parse");
+
+        assert_eq!(items.len(), 1);
+        assert!(items[0].summary.contains("Ada Lovelace, Grace Hopper"));
     }
 }

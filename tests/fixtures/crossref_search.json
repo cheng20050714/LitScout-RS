@@ -1,0 +1,33 @@
+{
+  "message": {
+    "items": [
+      {
+        "DOI": "10.1234/tool-agent",
+        "title": ["Tool Calling Agents in Rust"],
+        "author": [
+          { "given": "Ada", "family": "Lovelace" },
+          { "given": "Grace", "family": "Hopper" }
+        ],
+        "container-title": ["Test Conference"],
+        "published-print": {
+          "date-parts": [[2026, 5, 1]]
+        },
+        "URL": "https://doi.org/10.1234/tool-agent",
+        "is-referenced-by-count": 9
+      },
+      {
+        "DOI": "10.5678/metadata-scout",
+        "title": ["Metadata Merging for Research Scouts"],
+        "author": [
+          { "name": "Alan Turing" }
+        ],
+        "container-title": ["Open Metadata Journal"],
+        "issued": {
+          "date-parts": [[2025]]
+        },
+        "URL": "https://doi.org/10.5678/metadata-scout",
+        "is-referenced-by-count": 3
+      }
+    ]
+  }
+}

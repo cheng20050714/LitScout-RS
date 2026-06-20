@@ -141,6 +141,12 @@ pub struct Cli {
 
     #[arg(long, env = "SEMANTIC_SCHOLAR_API_KEY", hide_env_values = true)]
     pub semantic_scholar_api_key: Option<String>,
+
+    #[arg(long, env = "OPENALEX_API_KEY", hide_env_values = true)]
+    pub openalex_api_key: Option<String>,
+
+    #[arg(long, env = "CROSSREF_MAILTO")]
+    pub crossref_mailto: Option<String>,
 }
 
 impl Cli {

@@ -33,13 +33,13 @@ pub fn build_evidence_memory(
         .collect::<Vec<SourceItem>>();
     source_items.extend(arxiv_papers.iter().map(SourceItem::from));
     source_items.extend(extra_source_items);
-    let deduped = dedup::dedup_by_id(source_items);
-    let mut ranked_items = ranking::rank_items(query, deduped);
+    let deduped = dedup::canonical_merge(source_items, source_lineage);
+    let mut ranked_items = ranking::rank_items(query, deduped.items);
     let rules = classify::load_rules(app_config.tags_file.as_deref())?;
     classify::classify_items_with_rules(&mut ranked_items, &rules);
     let groups = classify::group_by_tags(&ranked_items, &rules);
     let citations = CitationLedger::from_items(&ranked_items);
-    let lineage_by_source = lineage_by_source(source_lineage);
+    let lineage_by_source = lineage_by_source(deduped.source_lineage);
     let items = ranked_items
         .iter()
         .filter_map(|item| {
@@ -378,6 +378,92 @@ mod tests {
         assert_eq!(result.ranked_items.len(), 1);
     }
 
+    #[test]
+    fn canonical_academic_merge_preserves_attempt_lineage_in_evidence_memory() {
+        let query = SearchQuery {
+            topic: "tool calling agents".to_string(),
+            github_limit: 10,
+            arxiv_limit: 10,
+        };
+        let mut semantic = academic_item();
+        if let crate::model::SourceMetadata::AcademicIndex {
+            doi, external_ids, ..
+        } = &mut semantic.metadata
+        {
+            *doi = Some("10.1234/tool-agent".to_string());
+            *external_ids = vec!["doi:10.1234/tool-agent".to_string()];
+        }
+        let crossref = crate::model::SourceItem {
+            id: "crossref:10.1234/tool-agent".to_string(),
+            kind: crate::model::SourceKind::Bibliography,
+            title: "Tool Calling Agents in Rust".to_string(),
+            url: "https://doi.org/10.1234/tool-agent".to_string(),
+            summary: "Bibliographic metadata: Ada Lovelace. TestConf, 2026.".to_string(),
+            evidence_snippet: "Bibliographic metadata: Ada Lovelace. TestConf, 2026.".to_string(),
+            tags: vec!["TestConf".to_string()],
+            score: 0.0,
+            score_reasons: Vec::new(),
+            classification_reasons: Vec::new(),
+            score_breakdown: Default::default(),
+            published_or_updated_at: None,
+            metadata: crate::model::SourceMetadata::Bibliography {
+                authors: vec!["Ada Lovelace".to_string()],
+                venue: Some("TestConf".to_string()),
+                year: Some(2026),
+                doi: Some("10.1234/tool-agent".to_string()),
+                citation_count: None,
+                native_id: "10.1234/tool-agent".to_string(),
+                source_name: "crossref".to_string(),
+                external_ids: vec!["doi:10.1234/tool-agent".to_string()],
+            },
+        };
+
+        let result = build_evidence_memory(
+            &query,
+            &test_config(),
+            Vec::new(),
+            Vec::new(),
+            vec![crossref, semantic],
+            vec![
+                sample_attempt("cr-1", "ch-1"),
+                sample_attempt("ss-1", "ch-1"),
+            ],
+            vec![
+                SourceQueryLineage {
+                    lineage_id: "lin-cr-1".to_string(),
+                    source_item_id: "crossref:10.1234/tool-agent".to_string(),
+                    chapter_id: Some("ch-1".to_string()),
+                    source_kind: Some(crate::model::SourceKind::Bibliography),
+                    query_attempt_ids: vec!["cr-1".to_string()],
+                    returned_item_ids: vec!["crossref:10.1234/tool-agent".to_string()],
+                    merged_from_item_ids: Vec::new(),
+                },
+                SourceQueryLineage {
+                    lineage_id: "lin-ss-1".to_string(),
+                    source_item_id: "semantic_scholar:abc123".to_string(),
+                    chapter_id: Some("ch-1".to_string()),
+                    source_kind: Some(crate::model::SourceKind::AcademicIndex),
+                    query_attempt_ids: vec!["ss-1".to_string()],
+                    returned_item_ids: vec!["semantic_scholar:abc123".to_string()],
+                    merged_from_item_ids: Vec::new(),
+                },
+            ],
+        )
+        .expect("evidence memory should build");
+
+        assert_eq!(result.ranked_items.len(), 1);
+        assert_eq!(result.ranked_items[0].id, "semantic_scholar:abc123");
+        assert_eq!(result.memory.items.len(), 1);
+        assert_eq!(
+            result.memory.items[0].query_attempt_ids,
+            vec!["cr-1".to_string(), "ss-1".to_string()]
+        );
+        let lineage = &result.memory.source_lineage[0];
+        assert!(lineage
+            .merged_from_item_ids
+            .contains(&"crossref:10.1234/tool-agent".to_string()));
+    }
+
     fn sample_repo() -> GitHubRepo {
         GitHubRepo {
             owner: "acme".to_string(),
@@ -435,6 +521,7 @@ mod tests {
                 citation_count: Some(5),
                 native_id: "abc123".to_string(),
                 source_name: "semantic_scholar".to_string(),
+                external_ids: Vec::new(),
             },
         }
     }
@@ -443,6 +530,8 @@ mod tests {
         AppConfig {
             github_token: Some("token".to_string()),
             semantic_scholar_api_key: None,
+            openalex_api_key: None,
+            crossref_mailto: None,
             output: std::env::temp_dir(),
             cache_dir: std::env::temp_dir(),
             session_dir: std::env::temp_dir(),

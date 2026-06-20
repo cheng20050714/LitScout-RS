@@ -11,7 +11,6 @@ import type {
   ReadingLibraryItemResponse,
   ReadingLibraryResponse,
   ReportTranslateResponse,
-  ReportChatResponse,
   RunPolicy,
   StatefulRunResponse,
   StatefulRunStreamEvent
@@ -132,23 +131,6 @@ export async function branchStatefulRun(
   return readJson<StatefulRunResponse>(response);
 }
 
-export async function askReport(
-  question: string,
-  reportMarkdown: string,
-  config: FrontendConfig
-): Promise<ReportChatResponse> {
-  const response = await fetch("/api/report/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      question,
-      report_markdown: reportMarkdown,
-      config
-    })
-  });
-  return readJson<ReportChatResponse>(response);
-}
-
 export async function listReadingLibrary(): Promise<ReadingLibraryResponse> {
   const response = await fetch("/api/library");
   return readJson<ReadingLibraryResponse>(response);
@@ -214,34 +196,6 @@ export async function askPaperStream(
     onEvent(chatEvent);
     if (chatEvent.event === "failed") {
       throw new Error(chatEvent.data.error ?? "论文追问失败。");
-    }
-  });
-}
-
-export async function askReportStream(
-  question: string,
-  reportMarkdown: string,
-  config: FrontendConfig,
-  onEvent: (event: ChatStreamEvent) => void
-): Promise<void> {
-  const response = await fetch("/api/report/chat/stream", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      question,
-      report_markdown: reportMarkdown,
-      config
-    })
-  });
-  if (!response.ok || !response.body) {
-    await readJson<unknown>(response);
-    return;
-  }
-  await readSse(response, (event) => {
-    const chatEvent = event as ChatStreamEvent;
-    onEvent(chatEvent);
-    if (chatEvent.event === "failed") {
-      throw new Error(chatEvent.data.error ?? "报告追问失败。");
     }
   });
 }
