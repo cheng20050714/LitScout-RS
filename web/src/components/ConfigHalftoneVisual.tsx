@@ -69,6 +69,7 @@ function ConfigHalftoneVisual() {
   return (
     <div className="config-halftone-visual" aria-hidden="true">
       <canvas ref={canvasRef} />
+      <div className="config-halftone-letter">R</div>
       <div className="config-halftone-vignette" />
     </div>
   );

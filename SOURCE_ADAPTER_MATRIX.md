@@ -1,8 +1,9 @@
 # Source Adapter Matrix
 
 Planning date: 2026-06-15
+Implementation status updated: 2026-06-23
 
-This matrix records candidate sources for expanding LitScout-RS beyond GitHub and arXiv. It is meant to drive implementation decisions later, not to change runtime behavior now.
+This matrix records candidate sources for expanding LitScout-RS beyond GitHub and arXiv. Stage A has now implemented Semantic Scholar, DBLP, OpenAlex, and Crossref behind explicit `academic_extra` enablement; later sections still describe the broader roadmap.
 
 ## 1. Admission Rubric
 
@@ -56,7 +57,7 @@ This section records the adapter integration contract, not permanent external qu
 | arXiv | None | none | Respect polite delay guidance; retry transient errors with bounded backoff | Keep existing default budget |
 | Semantic Scholar | Optional API key for higher quota | `SEMANTIC_SCHOLAR_API_KEY` | Treat 429 as a structured `QueryAttempt` failure with retry-after/backoff metadata | First Stage A adapter; cap per run until ranking regression is stable |
 | DBLP | None | none | Use conservative concurrency; retry 429/5xx with bounded backoff | Pair with another academic source rather than broad standalone expansion |
-| OpenAlex | Public access; contact email or provider key may be recommended by current docs | `OPENALEX_EMAIL` or future provider-specific key | Preserve remaining/reset metadata when available; back off on 429 | Enable after dedup rules are stable |
+| OpenAlex | API key required by current implementation | `OPENALEX_API_KEY` / `--openalex-api-key` | Missing key is recorded as a skipped non-citeable attempt; preserve remaining/reset metadata when available; back off on 429 | Enabled only with academic extra |
 | Crossref | Public access; contact email recommended for polite use | `CROSSREF_MAILTO` | Use polite user agent/contact metadata; back off on 429/503 | Use mainly for DOI validation and enrichment |
 | ACL Anthology | None if using public static metadata | local metadata path or release URL | Prefer local indexed metadata over repeated live fetches | Domain/profile budget only |
 | OpenReview | Usually public for public venues; credentials only for non-public data, which should stay out of core flow | none for public mode | Venue-scoped pagination and bounded retries | Domain/profile budget only |
@@ -74,7 +75,7 @@ Every adapter should map native records into a common evidence shape:
 
 | Normalized Field | Required | Notes |
 |---|---:|---|
-| `source_item_id` | yes | Stable prefix plus native ID: `semantic_scholar:<paperId>`, `dblp:<key>`, `openalex:<work_id>`, `doi:<doi>` |
+| `source_item_id` | yes | Stable prefix plus native ID: `semantic_scholar:<paperId>`, `dblp:<key>`, `openalex:<work_id>`, `crossref:<doi>` |
 | `source_kind` | yes | Should distinguish implementation, preprint, academic index, venue corpus, domain preprint, web, news |
 | `title` | yes | Cleaned, human-readable title |
 | `url` | yes | Landing page preferred over API URL; PDF URL can be metadata |
@@ -168,17 +169,19 @@ When duplicates are merged:
 - keep the richest abstract/summary;
 - keep source-specific ranking features such as citations, stars, venue, category, and update date.
 
-## 8. Recommended First Implementation Slice
+## 8. Implemented Stage A Slice
 
-When code work begins, the first slice should be deliberately small:
+The first two-source slice has been completed and then closed out with OpenAlex/Crossref plus canonical merge:
 
 1. Add `SemanticScholarAdapter`.
 2. Add `DblpAdapter`.
-3. Extend source kind/tier metadata.
-4. Keep GitHub/arXiv default behavior unchanged unless `--academic-extra` or equivalent UI setting is enabled.
-5. Add fixture parser tests and ranking regression before enabling in default runs.
+3. Add `OpenAlexAdapter`.
+4. Add `CrossrefAdapter`.
+5. Extend source kind/tier metadata and external IDs.
+6. Keep GitHub/arXiv default behavior unchanged unless `--academic-extra` or equivalent UI setting is enabled.
+7. Add fixture parser tests, canonical merge tests, ranking regression, and EvidenceQualityGate regression before enabling in default runs.
 
-OpenAlex and Crossref should follow once dedup and metadata merge rules are stable.
+Current runtime order is fixed by the academic adapter registry: Semantic Scholar, DBLP, OpenAlex, Crossref. All successful, empty, skipped, HTTP-error, rate-limited, and parser-error outcomes should be visible as `QueryAttempt` diagnostics. Academic extras must pass EvidenceQualityGate before they enter `EvidenceMemory` or `CitationLedger`.
 
 ## 9. References
 

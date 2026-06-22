@@ -1,12 +1,16 @@
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 use crate::config::AppConfig;
 use crate::error::Result;
 use crate::model::{
-    ArxivPaper, CategoryGroup, CitationLedger, EvidenceItem, EvidenceMemory, GitHubRepo,
-    QueryAttempt, SearchQuery, SourceItem, SourceKind, SourceQueryLineage,
+    ArxivPaper, CategoryGroup, CitationLedger, EvidenceItem, EvidenceMemory,
+    EvidenceSelectionReport, GitHubRepo, QueryAttempt, RejectedEvidenceItem, SearchQuery,
+    SourceItem, SourceKind, SourceQueryLineage,
 };
 use crate::{classify, dedup, ranking};
+
+use super::evidence_quality;
 
 const EVIDENCE_NOTE_MAX_CHARS: usize = 150;
 
@@ -14,6 +18,8 @@ const EVIDENCE_NOTE_MAX_CHARS: usize = 150;
 pub struct EvidenceBuildResult {
     pub memory: EvidenceMemory,
     pub ranked_items: Vec<SourceItem>,
+    pub rejected_items: Vec<RejectedEvidenceItem>,
+    pub selection_report: EvidenceSelectionReport,
     pub groups: Vec<CategoryGroup>,
     pub citations: CitationLedger,
 }
@@ -33,14 +39,29 @@ pub fn build_evidence_memory(
         .collect::<Vec<SourceItem>>();
     source_items.extend(arxiv_papers.iter().map(SourceItem::from));
     source_items.extend(extra_source_items);
+    let raw_item_count = source_items.len();
     let deduped = dedup::canonical_merge(source_items, source_lineage);
+    let merged_item_count = deduped.items.len();
     let mut ranked_items = ranking::rank_items(query, deduped.items);
     let rules = classify::load_rules(app_config.tags_file.as_deref())?;
     classify::classify_items_with_rules(&mut ranked_items, &rules);
-    let groups = classify::group_by_tags(&ranked_items, &rules);
-    let citations = CitationLedger::from_items(&ranked_items);
+    let quality = evidence_quality::apply_quality_gate(
+        query,
+        &ranked_items,
+        &deduped.source_lineage,
+        &query_attempts,
+        raw_item_count,
+        merged_item_count,
+    );
+    let accepted_items = quality.accepted_items;
+    let accepted_item_ids = accepted_items
+        .iter()
+        .map(|item| item.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let groups = classify::group_by_tags(&accepted_items, &rules);
+    let citations = CitationLedger::from_items(&accepted_items);
     let lineage_by_source = lineage_by_source(deduped.source_lineage);
-    let items = ranked_items
+    let items = accepted_items
         .iter()
         .filter_map(|item| {
             evidence_from_source_item(item, &citations, &query_attempts, &lineage_by_source)
@@ -51,9 +72,16 @@ pub fn build_evidence_memory(
         memory: EvidenceMemory {
             items,
             query_attempts,
-            source_lineage: lineage_by_source.values().cloned().collect(),
+            source_lineage: lineage_by_source
+                .values()
+                .filter(|lineage| accepted_item_ids.contains(lineage.source_item_id.as_str()))
+                .cloned()
+                .collect(),
+            selection_report: quality.selection_report.clone(),
         },
         ranked_items,
+        rejected_items: quality.rejected_items,
+        selection_report: quality.selection_report,
         groups,
         citations,
     })
@@ -376,6 +404,79 @@ mod tests {
 
         assert!(result.memory.items.is_empty());
         assert_eq!(result.ranked_items.len(), 1);
+        assert_eq!(result.selection_report.rejected_item_count, 1);
+    }
+
+    #[test]
+    fn zero_keyword_academic_item_stays_ranked_but_not_in_evidence_memory() {
+        let query = SearchQuery {
+            topic: "rust agent".to_string(),
+            github_limit: 10,
+            arxiv_limit: 10,
+        };
+        let mut item = academic_item();
+        item.id = "semantic_scholar:off-topic".to_string();
+        item.title = "Diffusion Image Priors".to_string();
+        item.summary = "A paper about visual generation.".to_string();
+        item.evidence_snippet = item.summary.clone();
+        let result = build_evidence_memory(
+            &query,
+            &test_config(),
+            Vec::new(),
+            Vec::new(),
+            vec![item],
+            vec![sample_attempt_with_source(
+                "ss-1",
+                "ch-1",
+                crate::model::SourceKind::AcademicIndex,
+                "semantic_scholar",
+            )],
+            vec![SourceQueryLineage {
+                lineage_id: "lin-ss-1".to_string(),
+                source_item_id: "semantic_scholar:off-topic".to_string(),
+                chapter_id: Some("ch-1".to_string()),
+                source_kind: Some(crate::model::SourceKind::AcademicIndex),
+                query_attempt_ids: vec!["ss-1".to_string()],
+                returned_item_ids: vec!["semantic_scholar:off-topic".to_string()],
+                merged_from_item_ids: Vec::new(),
+            }],
+        )
+        .expect("evidence memory should build");
+
+        assert_eq!(result.ranked_items.len(), 1);
+        assert!(result.memory.items.is_empty());
+        assert_eq!(result.rejected_items[0].reason, "no_topic_match");
+        assert_eq!(result.memory.selection_report.rejected_item_count, 1);
+    }
+
+    #[test]
+    fn github_sources_are_not_filtered_by_quality_gate() {
+        let query = SearchQuery {
+            topic: "quantum compiler".to_string(),
+            github_limit: 10,
+            arxiv_limit: 10,
+        };
+        let result = build_evidence_memory(
+            &query,
+            &test_config(),
+            vec![sample_repo()],
+            Vec::new(),
+            Vec::new(),
+            vec![sample_attempt("gh-1", "ch-1")],
+            vec![SourceQueryLineage {
+                lineage_id: "lin-gh-1".to_string(),
+                source_item_id: "github:acme/rust-agent".to_string(),
+                chapter_id: Some("ch-1".to_string()),
+                source_kind: Some(crate::model::SourceKind::GitHub),
+                query_attempt_ids: vec!["gh-1".to_string()],
+                returned_item_ids: vec!["github:acme/rust-agent".to_string()],
+                merged_from_item_ids: Vec::new(),
+            }],
+        )
+        .expect("evidence memory should build");
+
+        assert_eq!(result.memory.items.len(), 1);
+        assert!(result.rejected_items.is_empty());
     }
 
     #[test]
@@ -481,16 +582,30 @@ mod tests {
     }
 
     fn sample_attempt(query_id: &str, chapter_id: &str) -> QueryAttempt {
+        sample_attempt_with_source(
+            query_id,
+            chapter_id,
+            crate::model::SourceKind::GitHub,
+            "github",
+        )
+    }
+
+    fn sample_attempt_with_source(
+        query_id: &str,
+        chapter_id: &str,
+        source_kind: crate::model::SourceKind,
+        source: &str,
+    ) -> QueryAttempt {
         QueryAttempt {
             query_id: query_id.to_string(),
-            source: "github".to_string(),
+            source: source.to_string(),
             query: "rust agent".to_string(),
             chapter_id: chapter_id.to_string(),
             round: 1,
             started_at: dt(),
             finished_at: Some(dt()),
             result_count: 1,
-            source_kind: Some(crate::model::SourceKind::GitHub),
+            source_kind: Some(source_kind),
             http_status: None,
             rate_limit_info: None,
             parser_error: None,

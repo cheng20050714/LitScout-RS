@@ -1002,6 +1002,7 @@ mod tests {
             items: vec![sample_evidence("ev-C1", "ch-1")],
             query_attempts: Vec::new(),
             source_lineage: Vec::new(),
+            selection_report: Default::default(),
         };
 
         let err = draft_report_with_llm(
@@ -1026,6 +1027,7 @@ mod tests {
             items: vec![sample_evidence("ev-C1", "ch-1")],
             query_attempts: Vec::new(),
             source_lineage: Vec::new(),
+            selection_report: Default::default(),
         };
         let config = crate::config::LlmConfig::from_env(true, 120);
 

@@ -10,6 +10,7 @@
 
 - GitHub repository search API.
 - arXiv Atom API.
+- Optional Stage A academic extras: Semantic Scholar, DBLP, OpenAlex, Crossref.
 - No arbitrary web crawling, browser automation, or PDF parsing.
 
 ## 3. Workflow
@@ -18,11 +19,12 @@
 topic
 -> optional DeepSeek SearchPlan
 -> GitHub/arXiv concurrent fetch
+-> optional Stage A academic extra fetch
 -> normalize SourceItem
--> dedup, rank, classify
+-> canonical merge, rank, classify
+-> EvidenceQualityGate
 -> CitationLedger
 -> optional DeepSeek synthesis and repair
--> quality gate
 -> Markdown report and session JSON
 ```
 
@@ -38,7 +40,7 @@ topic
 
 ## 5. LLM Harness
 
-- DeepSeek receives only structured GitHub/arXiv context.
+- DeepSeek receives only structured accepted evidence from GitHub/arXiv and explicitly enabled academic extras.
 - LLM output must use CitationLedger URLs.
 - One repair prompt is allowed if citation validation fails.
 - Missing API key returns a clear config error.

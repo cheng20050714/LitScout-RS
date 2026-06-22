@@ -21,6 +21,12 @@ token_env = "GITHUB_TOKEN"
 [semantic_scholar]
 api_key_env = "SEMANTIC_SCHOLAR_API_KEY"
 
+[openalex]
+api_key_env = "OPENALEX_API_KEY"
+
+[crossref]
+mailto_env = "CROSSREF_MAILTO"
+
 [llm.deepseek]
 enabled = false
 api_key_env = "DEEPSEEK_API_KEY"

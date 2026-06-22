@@ -71,6 +71,14 @@ unset GITHUB_TOKEN
 export GITHUB_TOKEN="你的 GitHub Token"
 ```
 
+如果需要扩展学术源，可选配置：
+
+```bash
+export SEMANTIC_SCHOLAR_API_KEY="可选，用于提升 Semantic Scholar 配额"
+export OPENALEX_API_KEY="OpenAlex 扩展源需要"
+export CROSSREF_MAILTO="you@example.com"
+```
+
 ## 3. Rust 后端验证
 
 每次改 Rust 代码后运行：
@@ -134,18 +142,18 @@ http://127.0.0.1:3001
 1. 阶段 1：填写 DeepSeek API Key。
 2. 可选填写 GitHub Token；如果不确定是否有效，先留空。
 3. 保存配置进入 Agent 阶段。
-4. 输入中文研究问题，设置 GitHub/arXiv 预算和章节上限。
+4. 输入中文研究问题，设置 GitHub/arXiv 预算和章节上限；需要扩大论文和书目覆盖时，显式开启“扩展学术源”。
 5. 点击“创建 Agent Run”，生成 ResearchBrief、ChapterPlan 和 QueryPortfolio。
 6. 在“计划”页检查并修改章节、GitHub queries、arXiv queries。
 7. 点击“保存计划修订”会写入新的 PlanReady checkpoint。
 8. 点击“批准并开始调研”，后端会进入 `Fetching -> EvidenceReady -> SynthesisReady -> Completed`。
 9. 右侧 Run Timeline 会显示状态机、事件流和 checkpoint。
-10. “证据”页查看 EvidenceMemory、query lineage 和抓取错误。
+10. “证据”页查看 EvidenceMemory、query lineage、抓取错误和扩展源精选摘要。
 11. “覆盖”页查看 QueryGap / SourceGap。
 12. “审计”页查看 CitationAudit 结果。
 13. “报告”页查看 Markdown 渲染结果。
 14. 可选点击“用 LLM 翻译为中文”。
-15. 可在“追问”页基于当前 EvidenceMemory 和报告继续提问。
+15. 可在“阅读库”页对单篇论文生成深度阅读笔记并继续追问。
 16. 如需回退，在右侧 PlanReady checkpoint 点击“创建分支”；旧 run 不会被修改。
 
 ## 7. CLI 运行
@@ -166,6 +174,12 @@ cargo run -- "rust agent framework" --llm --output reports/rust-agent.md
 
 ```bash
 cargo run -- "llm tool calling" --llm --github-limit 8 --arxiv-limit 8
+```
+
+显式启用 Stage A 学术扩源：
+
+```bash
+cargo run -- "llm agent benchmark" --llm --academic-extra --academic-limit 10
 ```
 
 ## 8. 常见问题

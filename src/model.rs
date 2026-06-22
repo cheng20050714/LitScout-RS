@@ -348,6 +348,8 @@ pub struct EvidenceMemory {
     pub query_attempts: Vec<QueryAttempt>,
     #[serde(default)]
     pub source_lineage: Vec<SourceQueryLineage>,
+    #[serde(default)]
+    pub selection_report: EvidenceSelectionReport,
 }
 
 impl EvidenceMemory {
@@ -358,6 +360,45 @@ impl EvidenceMemory {
             .cloned()
             .collect()
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct EvidenceSelectionReport {
+    pub raw_item_count: usize,
+    pub merged_item_count: usize,
+    pub ranked_item_count: usize,
+    pub accepted_item_count: usize,
+    pub rejected_item_count: usize,
+    #[serde(default)]
+    pub accepted_by_source_kind: Vec<SourceKindCount>,
+    #[serde(default)]
+    pub rejected_by_source_kind: Vec<SourceKindCount>,
+    #[serde(default)]
+    pub rejection_reasons: Vec<RejectionReasonCount>,
+    #[serde(default)]
+    pub rejected_items: Vec<RejectedEvidenceItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SourceKindCount {
+    pub source_kind: SourceKind,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RejectionReasonCount {
+    pub reason: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RejectedEvidenceItem {
+    pub source_item_id: String,
+    pub title: String,
+    pub source_kind: SourceKind,
+    pub source_name: String,
+    pub score: f64,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -621,6 +662,21 @@ mod tests {
                 ..
             } if external_ids.is_empty()
         ));
+    }
+
+    #[test]
+    fn evidence_memory_deserializes_without_selection_report() {
+        let json = r#"{
+            "items": [],
+            "query_attempts": [],
+            "source_lineage": []
+        }"#;
+
+        let memory: EvidenceMemory =
+            serde_json::from_str(json).expect("legacy evidence memory parses");
+
+        assert_eq!(memory.selection_report.accepted_item_count, 0);
+        assert!(memory.selection_report.rejection_reasons.is_empty());
     }
 
     #[test]

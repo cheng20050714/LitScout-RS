@@ -221,6 +221,8 @@ Implement Semantic Scholar and DBLP first, then OpenAlex/Crossref as metadata va
 
 The first implementation should keep all new sources behind explicit CLI/Web settings. The default run can continue using GitHub/arXiv until Stage A passes evaluation.
 
+Status update: this phase is implemented in the current codebase. Stage A uses Semantic Scholar, DBLP, OpenAlex, and Crossref behind explicit academic-extra enablement, then applies canonical merge and EvidenceQualityGate before evidence enters CitationLedger or EvidenceMemory.
+
 ### Phase 4: Ranking and Coverage Hardening
 
 Add source lanes, per-lane quotas, source tier bonuses/penalties, and regression tests so broad bibliographic sources do not drown out high-signal existing evidence.

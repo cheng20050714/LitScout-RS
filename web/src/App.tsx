@@ -60,6 +60,7 @@ function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [activity, setActivity] = useState<Activity>("idle");
   const [progress, setProgress] = useState(0);
+  const [displayProgress, setDisplayProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState("等待配置");
   const [agentRun, setAgentRun] = useState<ResearchRunRecord | null>(null);
   const [events, setEvents] = useState<StatefulRunStreamEvent[]>([]);
@@ -81,6 +82,42 @@ function App() {
       .catch((error: Error) => setNotice(error.message));
     refreshLibrary();
   }, []);
+
+  const progressActive = activity === "planning" || activity === "revising" || activity === "running";
+  const progressCap = useMemo(
+    () => progressSoftCap(activity, agentRun?.state, progress),
+    [activity, agentRun?.state, progress]
+  );
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setDisplayProgress((current) => {
+        const target = clampProgress(progress);
+        const cap = clampProgress(progressActive ? progressCap : target);
+        const distanceToTarget = target - current;
+
+        if (Math.abs(distanceToTarget) < 0.2 && (!progressActive || current >= cap)) {
+          return target;
+        }
+
+        if (current < target) {
+          return clampProgress(current + Math.max(distanceToTarget * 0.2, 0.35));
+        }
+
+        if (current > target && (!progressActive || current > cap)) {
+          return clampProgress(current - Math.max((current - target) * 0.18, 0.35));
+        }
+
+        if (progressActive && current < cap) {
+          return clampProgress(current + Math.min(Math.max((cap - current) * 0.018, 0.08), 0.32));
+        }
+
+        return current;
+      });
+    }, 180);
+
+    return () => window.clearInterval(timer);
+  }, [progress, progressActive, progressCap]);
 
   const reportPreview = useMemo(() => {
     if (reportMarkdown) return reportMarkdown;
@@ -418,20 +455,22 @@ ${chapters}
                 <h2>进度、检查点与事件</h2>
                 <p className="telemetry-summary-hint">点击查看详细进度 · {progressLabel}</p>
               </div>
-              <span className="badge">{Math.round(progress)}%</span>
+              <span className={progressActive ? "badge progress-badge is-active" : "badge progress-badge"}>
+                {Math.round(displayProgress)}%
+              </span>
             </summary>
             <div className="telemetry-grid">
               {/* Status card */}
               <div className="status-stack telemetry-card">
                 <div
-                  className="progress-meter"
+                  className={progressActive ? "progress-meter is-active" : "progress-meter"}
                   role="progressbar"
                   aria-label={progressLabel}
                   aria-valuemin={0}
                   aria-valuemax={100}
-                  aria-valuenow={Math.round(progress)}
+                  aria-valuenow={Math.round(displayProgress)}
                 >
-                  <div style={{ width: `${Math.min(progress, 100)}%` }} />
+                  <div style={{ width: `${Math.min(displayProgress, 100)}%` }} />
                 </div>
                 <p className="progress-label">{progressLabel}</p>
 
@@ -544,6 +583,30 @@ function progressForState(state: ResearchRunRecord["state"]) {
   return (
     { created: 24, plan_ready: 45, fetching: 62, evidence_ready: 78, synthesis_ready: 92, completed: 100, failed: 100 }[state] ?? 0
   );
+}
+
+function progressSoftCap(activity: Activity, state: ResearchRunRecord["state"] | undefined, target: number) {
+  if (activity === "planning") return Math.max(target, 42);
+  if (activity === "revising") return Math.max(target, 52);
+  if (activity !== "running") return target;
+
+  const cap = (
+    {
+      created: 54,
+      plan_ready: 58,
+      fetching: 76,
+      evidence_ready: 88,
+      synthesis_ready: 97,
+      completed: 100,
+      failed: 100
+    } satisfies Record<ResearchRunRecord["state"], number>
+  )[state ?? "fetching"];
+
+  return Math.max(target, cap);
+}
+
+function clampProgress(value: number) {
+  return Math.max(0, Math.min(100, value));
 }
 
 function readableActivity(activity: Activity) {

@@ -298,6 +298,30 @@ async fn continue_from_plan_ready(
     )?;
     let ranked_total = evidence.ranked_items.len();
     let group_total = evidence.groups.len();
+    let selected_total = evidence.memory.items.len();
+    let rejected_total = evidence.rejected_items.len();
+    let top_rejection_reasons = evidence
+        .selection_report
+        .rejection_reasons
+        .iter()
+        .take(3)
+        .map(|reason| format!("{}={}", reason.reason, reason.count))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if run.policy.academic_extra_enabled
+        && evidence.selection_report.rejected_item_count > 0
+        && evidence.memory.items.iter().all(|item| {
+            !matches!(
+                item.source_kind,
+                crate::model::SourceKind::AcademicIndex | crate::model::SourceKind::Bibliography
+            )
+        })
+    {
+        run.warnings.push(
+            "扩展学术源返回了候选结果，但 EvidenceQualityGate 未筛出可引用证据；报告将继续使用 GitHub/arXiv 证据。"
+                .to_string(),
+        );
+    }
     let coverage = if run.policy.skip_coverage_critic {
         CoverageReport::pass()
     } else {
@@ -345,7 +369,12 @@ async fn continue_from_plan_ready(
     trace
         .append(&TraceEvent::QualityWarning {
             message: format!(
-                "EvidenceBuilder ranked {ranked_total} item(s) into {group_total} group(s)."
+                "EvidenceQualityGate ranked {ranked_total} item(s), accepted {selected_total}, rejected {rejected_total}, grouped {group_total}. Top rejection reasons: {}",
+                if top_rejection_reasons.is_empty() {
+                    "none".to_string()
+                } else {
+                    top_rejection_reasons
+                }
             ),
             at: Utc::now(),
         })

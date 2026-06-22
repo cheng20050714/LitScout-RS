@@ -217,6 +217,38 @@ export interface EvidenceMemory {
   items: EvidenceItem[];
   query_attempts: QueryAttempt[];
   source_lineage: SourceQueryLineage[];
+  selection_report?: EvidenceSelectionReport;
+}
+
+export interface EvidenceSelectionReport {
+  raw_item_count: number;
+  merged_item_count: number;
+  ranked_item_count: number;
+  accepted_item_count: number;
+  rejected_item_count: number;
+  accepted_by_source_kind?: SourceKindCount[];
+  rejected_by_source_kind?: SourceKindCount[];
+  rejection_reasons?: RejectionReasonCount[];
+  rejected_items?: RejectedEvidenceItem[];
+}
+
+export interface SourceKindCount {
+  source_kind: SourceKind;
+  count: number;
+}
+
+export interface RejectionReasonCount {
+  reason: string;
+  count: number;
+}
+
+export interface RejectedEvidenceItem {
+  source_item_id: string;
+  title: string;
+  source_kind: SourceKind;
+  source_name: string;
+  score: number;
+  reason: string;
 }
 
 export interface SourceQueryLineage {

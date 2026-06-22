@@ -1,6 +1,7 @@
 import type {
   EvidenceItem,
   EvidenceMemory,
+  EvidenceSelectionReport,
   ReadingLibrarySummary,
   ResearchRunRecord
 } from "../api/types";
@@ -49,6 +50,10 @@ function EvidenceMemoryView({
         </div>
         <span className="badge">{memory.query_attempts.length} 次查询</span>
       </div>
+
+      {memory.selection_report && (
+        <SelectionSummary report={memory.selection_report} />
+      )}
 
       {failedAttempts.length > 0 && (
         <div className="warning-box">
@@ -122,6 +127,39 @@ function EvidenceMemoryView({
   );
 }
 
+function SelectionSummary({ report }: { report: EvidenceSelectionReport }) {
+  const reasons = (report.rejection_reasons ?? []).slice(0, 3);
+
+  return (
+    <section className="selection-summary" aria-label="证据筛选摘要">
+      <div className="selection-metrics">
+        <SelectionMetric label="候选" value={report.raw_item_count} />
+        <SelectionMetric label="合并后" value={report.merged_item_count} />
+        <SelectionMetric label="精选" value={report.accepted_item_count} />
+        <SelectionMetric label="拒绝" value={report.rejected_item_count} />
+      </div>
+      {reasons.length > 0 && (
+        <div className="selection-reasons">
+          {reasons.map((reason) => (
+            <span className="badge" key={reason.reason}>
+              {reasonLabel(reason.reason)} × {reason.count}
+            </span>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SelectionMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
 function EvidenceCard({
   item,
   memory,
@@ -190,6 +228,29 @@ function sourceLabel(kind: EvidenceItem["source_kind"]) {
       return "Bibliography";
     default:
       return String(kind);
+  }
+}
+
+function reasonLabel(reason: string) {
+  switch (reason) {
+    case "empty_content_without_verifiable_metadata":
+      return "内容不足";
+    case "no_successful_lineage":
+      return "无成功链路";
+    case "no_topic_match":
+      return "主题不匹配";
+    case "academic_index_no_title_or_summary_match":
+      return "标题摘要不匹配";
+    case "bibliography_weak_title_match":
+      return "书目标题弱匹配";
+    case "bibliography_missing_metadata":
+      return "书目元数据不足";
+    case "bibliography_ratio_limit":
+      return "书目占比限制";
+    case "rust_plant_disease_ambiguity":
+      return "Rust 语义歧义";
+    default:
+      return reason;
   }
 }
 

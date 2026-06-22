@@ -11,6 +11,7 @@ pub mod arxiv_scout;
 pub mod citation_auditor;
 pub mod coverage_critic;
 pub mod evidence;
+pub mod evidence_quality;
 pub mod github_scout;
 pub mod middleware;
 pub mod orchestrator;
