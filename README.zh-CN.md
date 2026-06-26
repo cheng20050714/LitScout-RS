@@ -259,5 +259,3 @@ node scripts/stage3_eval.mjs
 - 如果希望 README 在 GitHub 上展示截图或架构图，建议把图片放在可追踪的 `docs/assets/` 目录下。
 
 ## License / 许可证
-
-当前仓库没有包含 license file。如果项目准备发布或复用，建议在 release 前添加明确许可证。
