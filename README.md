@@ -1,6 +1,10 @@
 # LitScout-RS
 
 <p align="center">
+  English | <a href="README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
   <img src="icon.png" alt="LitScout-RS logo" width="132" />
 </p>
 
